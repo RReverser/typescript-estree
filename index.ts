@@ -220,7 +220,7 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
 			let [, pattern, flags] = raw.match(/^\/(.*)\/([a-z]*)$/);
 			return wrap<ESTree.RegExpLiteral>(node, {
 				type: 'Literal',
-				value: new RegExp(node.text),
+				value: new RegExp(pattern, flags),
 				raw,
 				regex: {
 					pattern,

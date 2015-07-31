@@ -203,7 +203,7 @@ function convertLiteral(node) {
             var _a = raw.match(/^\/(.*)\/([a-z]*)$/), pattern = _a[1], flags = _a[2];
             return wrap(node, {
                 type: 'Literal',
-                value: new RegExp(node.text),
+                value: new RegExp(pattern, flags),
                 raw: raw,
                 regex: {
                     pattern: pattern,
