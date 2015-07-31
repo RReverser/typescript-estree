@@ -63,7 +63,7 @@ function convertNullable(node, convert) {
 }
 function convertClassDeclaration(node) {
     var superClass = null;
-    node.heritageClauses.some(function (clause) {
+    (node.heritageClauses || []).some(function (clause) {
         if (clause.token === 79 /* ExtendsKeyword */) {
             superClass = convertExpression(clause.types[0].expression);
             return true;
@@ -83,7 +83,7 @@ function convertClassDeclaration(node) {
     });
 }
 function convertClassElement(node) {
-    if (node.kind === 141 /* IndexSignature */) {
+    if (node.kind === 141 /* IndexSignature */ || node.kind === 179 /* SemicolonClassElement */) {
         // TODO
         return null;
     }
@@ -109,9 +109,12 @@ function convertFunctionLikeClassElement(node) {
     return wrap(node, {
         type: 'MethodDefinition',
         kind: kind,
-        key: convertDeclarationName(node.name),
+        key: node.name ? convertDeclarationName(node.name) : wrap(node.getFirstToken(), {
+            type: 'Identifier',
+            name: node.getFirstToken().getText()
+        }),
         value: convertFunctionLikeDeclaration(node),
-        computed: node.name.kind === 128 /* ComputedPropertyName */,
+        computed: node.name != null && node.name.kind === 128 /* ComputedPropertyName */,
         static: !!(node.flags & 128 /* Static */)
     });
 }
@@ -127,7 +130,8 @@ function convertIdentifierOrBindingPattern(node) {
         : convertBindingPattern(node);
 }
 function convertArrayBindingElement(node) {
-    convertIdentifier;
+    if (node.name == null)
+        return null;
     var name = convertDeclarationName(node.name);
     if (node.dotDotDotToken) {
         return wrap(node, {
@@ -193,6 +197,19 @@ function convertLiteral(node) {
                 value: Number(node.text),
                 raw: raw
             });
+        case 10 /* NoSubstitutionTemplateLiteral */:
+            return wrap(node, {
+                type: 'TemplateLiteral',
+                quasis: [wrap(node, {
+                        type: 'TemplateElement',
+                        value: {
+                            cooked: node.text,
+                            raw: raw.slice(1, -1)
+                        },
+                        tail: false
+                    })],
+                expressions: []
+            });
         case 8 /* StringLiteral */:
             return wrap(node, {
                 type: 'Literal',
@@ -201,9 +218,16 @@ function convertLiteral(node) {
             });
         case 9 /* RegularExpressionLiteral */: {
             var _a = raw.match(/^\/(.*)\/([a-z]*)$/), pattern = _a[1], flags = _a[2];
+            var value;
+            try {
+                value = new RegExp(pattern, flags);
+            }
+            catch (e) {
+                value = null;
+            }
             return wrap(node, {
                 type: 'Literal',
-                value: new RegExp(pattern, flags),
+                value: value,
                 raw: raw,
                 regex: {
                     pattern: pattern,
@@ -221,6 +245,41 @@ function convertLiteral(node) {
             unexpected(node);
     }
 }
+function convertTemplateSpanLiteral(node) {
+    return wrap(node, {
+        type: 'TemplateElement',
+        value: {
+            cooked: node.text,
+            raw: node.getText()
+        },
+        tail: false
+    });
+}
+function convertTemplateExpression(node) {
+    var quasis = [convertTemplateSpanLiteral(node.head)];
+    var expressions = [];
+    node.templateSpans.forEach(function (_a) {
+        var expression = _a.expression, literal = _a.literal;
+        expressions.push(convertExpression(expression));
+        quasis.push(convertTemplateSpanLiteral(literal));
+    });
+    quasis[quasis.length - 1].tail = true;
+    return wrap(node, {
+        type: 'TemplateLiteral',
+        quasis: quasis,
+        expressions: expressions
+    });
+}
+function convertTaggedTemplateExpression(node) {
+    var tmpl = node.template;
+    return wrap(node, {
+        type: 'TaggedTemplateExpression',
+        tag: convertExpression(node.tag),
+        quasi: tmpl.kind === 172 /* TemplateExpression */
+            ? convertTemplateExpression(tmpl)
+            : convertLiteral(tmpl)
+    });
+}
 function convertExpressionStatement(node) {
     return wrap(node, {
         type: 'ExpressionStatement',
@@ -229,9 +288,60 @@ function convertExpressionStatement(node) {
 }
 function convertTopStatement(node) {
     switch (node.kind) {
+        case 210 /* ImportDeclaration */:
+            return convertImportDeclaration(node);
+        case 216 /* ExportDeclaration */:
+            return convertExportDeclaration(node);
         default:
             return convertStatement(node);
     }
+}
+function convertImportDeclaration(node) {
+    if (node.moduleSpecifier.kind !== 8 /* StringLiteral */) {
+        unexpected(node.moduleSpecifier);
+    }
+    return wrap(node, {
+        type: 'ImportDeclaration',
+        specifiers: convertImportClause(node.importClause),
+        source: convertLiteral(node.moduleSpecifier)
+    });
+}
+function convertImportClause(node) {
+    var specifiers = [];
+    if (node == null)
+        return specifiers;
+    var name = node.name, namedBindings = node.namedBindings;
+    if (name) {
+        specifiers.push(wrap(name, {
+            type: 'ImportDefaultSpecifier',
+            local: convertIdentifier(name)
+        }));
+    }
+    if (namedBindings) {
+        switch (namedBindings.kind) {
+            case 212 /* NamespaceImport */:
+                specifiers.push(wrap(namedBindings, {
+                    type: 'ImportNamespaceSpecifier',
+                    local: convertIdentifier(namedBindings.name)
+                }));
+                break;
+            case 213 /* NamedImports */:
+                specifiers = specifiers.concat(namedBindings.elements.map(function (binding) {
+                    return wrap(binding, {
+                        type: 'ImportSpecifier',
+                        local: convertIdentifier(binding.propertyName || binding.name),
+                        imported: convertIdentifier(binding.name)
+                    });
+                }));
+                break;
+            default:
+                unexpected(node.namedBindings);
+        }
+    }
+    return specifiers;
+}
+function convertExportDeclaration(node) {
+    // TODO
 }
 function convertStatement(node) {
     switch (node.kind) {
@@ -265,7 +375,8 @@ function convertStatement(node) {
         case 193 /* WithStatement */:
             return convertWithStatement(node);
         case 188 /* ForInStatement */:
-            return convertForInStatement(node);
+        case 189 /* ForOfStatement */:
+            return convertForInOrOfStatement(node);
         case 187 /* ForStatement */:
             return convertForStatement(node);
         case 186 /* WhileStatement */:
@@ -301,6 +412,8 @@ function convertExpression(node) {
             return null;
         case 93 /* ThisKeyword */:
             return wrap(node, { type: 'ThisExpression' });
+        case 91 /* SuperKeyword */:
+            return wrap(node, { type: 'Super' });
         case 65 /* Identifier */:
             return convertIdentifier(node);
         case 170 /* BinaryExpression */:
@@ -330,9 +443,23 @@ function convertExpression(node) {
             return convertPropertyAccessExpression(node);
         case 157 /* ElementAccessExpression */:
             return convertElementAccessExpression(node);
+        case 172 /* TemplateExpression */:
+            return convertTemplateExpression(node);
+        case 174 /* SpreadElementExpression */:
+            return convertSpreadElementExpression(node);
+        case 173 /* YieldExpression */:
+            return convertYieldExpression(node);
+        case 160 /* TaggedTemplateExpression */:
+            return convertTaggedTemplateExpression(node);
         default:
             return convertLiteral(node);
     }
+}
+function convertSpreadElementExpression(node) {
+    return wrap(node, {
+        type: 'SpreadElement',
+        argument: convertExpression(node.expression)
+    });
 }
 function convertPropertyAccessExpression(node) {
     return wrap(node, {
@@ -456,7 +583,7 @@ function convertCatchClause(node) {
 function convertYieldExpression(node) {
     return wrap(node, {
         type: 'YieldExpression',
-        argument: convertExpression(node.expression),
+        argument: convertNullable(node.expression, convertExpression),
         delegate: !!node.asteriskToken
     });
 }
@@ -592,9 +719,9 @@ function convertForStatement(node) {
         body: convertStatement(node.statement)
     });
 }
-function convertForInStatement(node) {
+function convertForInOrOfStatement(node) {
     return wrap(node, {
-        type: 'ForInStatement',
+        type: node.kind === 188 /* ForInStatement */ ? 'ForInStatement' : 'ForOfStatement',
         left: convertVariableDeclarationOrExpression(node.initializer),
         right: convertExpression(node.expression),
         body: convertStatement(node.statement)
@@ -630,8 +757,8 @@ function convertObjectLiteralElement(node) {
     switch (node.kind) {
         case 226 /* ShorthandPropertyAssignment */:
         case 225 /* PropertyAssignment */:
-        case 135 /* MethodDeclaration */:
             return convertObjectLiteralPropertyElement(node);
+        case 135 /* MethodDeclaration */:
         case 137 /* GetAccessor */:
         case 138 /* SetAccessor */:
             return convertObjectLiteralFunctionLikeElement(node);
@@ -655,9 +782,7 @@ function convertObjectLiteralPropertyElement(node) {
 }
 function convertObjectBindingElement(node) {
     var isShorthand = node.kind === 226 /* ShorthandPropertyAssignment */;
-    var value = isShorthand
-        ? convertDeclarationName(node.name)
-        : convertExpression(node.initializer);
+    var value = convertIdentifierOrBindingPattern(node.name);
     if (node.initializer) {
         value = {
             type: 'AssignmentPattern',
@@ -667,7 +792,7 @@ function convertObjectBindingElement(node) {
     }
     return wrap(node, {
         type: 'Property',
-        key: convertDeclarationName(node.name),
+        key: convertIdentifierOrBindingPattern(node.propertyName || node.name),
         value: value,
         kind: 'init',
         method: false,

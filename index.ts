@@ -72,7 +72,7 @@ function convertNullable<From extends ts.Node, To extends ESTree.Node>(node: Fro
 
 function convertClassDeclaration(node: ts.ClassDeclaration) {
 	var superClass: ESTree.Expression = null;
-	node.heritageClauses.some(clause => {
+	(node.heritageClauses || []).some(clause => {
 		if (clause.token === ts.SyntaxKind.ExtendsKeyword) {
 			superClass = convertExpression(clause.types[0].expression);
 			return true;
@@ -94,7 +94,7 @@ function convertClassDeclaration(node: ts.ClassDeclaration) {
 type ts_FunctionLikeClassElement = ts.MethodDeclaration | ts.ConstructorDeclaration | ts.AccessorDeclaration;
 
 function convertClassElement(node: ts.ClassElement) {
-	if (node.kind === ts.SyntaxKind.IndexSignature) {
+	if (node.kind === ts.SyntaxKind.IndexSignature || node.kind === ts.SyntaxKind.SemicolonClassElement) {
 		// TODO
 		return null;
 	}
@@ -113,9 +113,12 @@ function convertFunctionLikeClassElement(node: ts_FunctionLikeClassElement) {
 	return wrap<ESTree.MethodDefinition>(node, {
 		type: 'MethodDefinition',
 		kind,
-		key: convertDeclarationName(node.name),
+		key: node.name ? convertDeclarationName(node.name) : wrap(node.getFirstToken(), {
+			type: 'Identifier',
+			name: node.getFirstToken().getText()
+		}),
 		value: convertFunctionLikeDeclaration(node),
-		computed: node.name.kind === ts.SyntaxKind.ComputedPropertyName,
+		computed: node.name != null && node.name.kind === ts.SyntaxKind.ComputedPropertyName,
 		static: !!(node.flags & ts.NodeFlags.Static)
 	});
 }
@@ -134,7 +137,7 @@ function convertIdentifierOrBindingPattern(node: ts.Identifier | ts.BindingPatte
 }
 
 function convertArrayBindingElement(node: ts.BindingElement) {
-	convertIdentifier
+	if (node.name == null) return null;
 	var name = convertDeclarationName(node.name);
 	if (node.dotDotDotToken) {
 		return wrap<ESTree.RestElement>(node, {
@@ -209,6 +212,20 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
 				raw
 			});
 
+		case ts.SyntaxKind.NoSubstitutionTemplateLiteral:
+			return wrap<ESTree.TemplateLiteral>(node, {
+				type: 'TemplateLiteral',
+				quasis: [wrap<ESTree.TemplateElement>(node, {
+					type: 'TemplateElement',
+					value: {
+						cooked: node.text,
+						raw: raw.slice(1, -1)
+					},
+					tail: false
+				})],
+				expressions: []
+			});
+
         case ts.SyntaxKind.StringLiteral:
 			return wrap<ESTree.Literal>(node, {
 				type: 'Literal',
@@ -218,9 +235,15 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
 
         case ts.SyntaxKind.RegularExpressionLiteral: {
 			let [, pattern, flags] = raw.match(/^\/(.*)\/([a-z]*)$/);
+			let value: RegExp;
+			try {
+				value = new RegExp(pattern, flags);
+			} catch (e) {
+				value = null;
+			}
 			return wrap<ESTree.RegExpLiteral>(node, {
 				type: 'Literal',
-				value: new RegExp(pattern, flags),
+				value,
 				raw,
 				regex: {
 					pattern,
@@ -241,6 +264,43 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
     }
 }
 
+function convertTemplateSpanLiteral(node: ts.LiteralExpression) {
+	return wrap<ESTree.TemplateElement>(node, {
+		type: 'TemplateElement',
+		value: {
+			cooked: node.text,
+			raw: node.getText()
+		},
+		tail: false
+	});
+}
+
+function convertTemplateExpression(node: ts.TemplateExpression) {
+	var quasis = [convertTemplateSpanLiteral(node.head)];
+	var expressions: Array<ESTree.Expression> = [];
+	node.templateSpans.forEach(({ expression, literal }) => {
+		expressions.push(convertExpression(expression));
+		quasis.push(convertTemplateSpanLiteral(literal));
+	});
+	quasis[quasis.length - 1].tail = true;
+	return wrap<ESTree.TemplateLiteral>(node, {
+		type: 'TemplateLiteral',
+		quasis,
+		expressions
+	});
+}
+
+function convertTaggedTemplateExpression(node: ts.TaggedTemplateExpression) {
+	var tmpl = node.template;
+	return wrap<ESTree.TaggedTemplateExpression>(node, {
+		type: 'TaggedTemplateExpression',
+		tag: convertExpression(node.tag),
+		quasi: tmpl.kind === ts.SyntaxKind.TemplateExpression
+			? convertTemplateExpression(<ts.TemplateExpression>tmpl)
+			: <ESTree.TemplateLiteral>convertLiteral(<ts.LiteralExpression>tmpl)
+	});
+}
+
 function convertExpressionStatement(node: ts.ExpressionStatement) {
 	return wrap<ESTree.ExpressionStatement>(node, {
 		type: 'ExpressionStatement',
@@ -250,9 +310,66 @@ function convertExpressionStatement(node: ts.ExpressionStatement) {
 
 function convertTopStatement(node: ts.ModuleElement): ESTree.Statement | ESTree.ModuleDeclaration {
 	switch (node.kind) {
+		case ts.SyntaxKind.ImportDeclaration:
+			return convertImportDeclaration(<ts.ImportDeclaration>node);
+
+		case ts.SyntaxKind.ExportDeclaration:
+			return convertExportDeclaration(<ts.ExportDeclaration>node);
+
 		default:
 			return convertStatement(node);
 	}
+}
+
+function convertImportDeclaration(node: ts.ImportDeclaration) {
+	if (node.moduleSpecifier.kind !== ts.SyntaxKind.StringLiteral) {
+		unexpected(node.moduleSpecifier);
+	}
+	return wrap<ESTree.ImportDeclaration>(node, {
+		type: 'ImportDeclaration',
+		specifiers: convertImportClause(node.importClause),
+		source: convertLiteral(<ts.LiteralExpression>node.moduleSpecifier)
+	});
+}
+
+function convertImportClause(node: ts.ImportClause) {
+	var specifiers: Array<ESTree.ImportSpecifier | ESTree.ImportDefaultSpecifier | ESTree.ImportNamespaceSpecifier> = [];
+	if (node == null) return specifiers;
+	var { name, namedBindings } = node;
+	if (name) {
+		specifiers.push(wrap<ESTree.ImportDefaultSpecifier>(name, {
+			type: 'ImportDefaultSpecifier',
+			local: convertIdentifier(name)
+		}))
+	}
+	if (namedBindings) {
+		switch (namedBindings.kind) {
+			case ts.SyntaxKind.NamespaceImport:
+				specifiers.push(wrap<ESTree.ImportNamespaceSpecifier>(namedBindings, {
+					type: 'ImportNamespaceSpecifier',
+					local: convertIdentifier((<ts.NamespaceImport>namedBindings).name)
+				}));
+				break;
+
+			case ts.SyntaxKind.NamedImports:
+				specifiers = specifiers.concat((<ts.NamedImports>namedBindings).elements.map(binding => {
+					return wrap<ESTree.ImportSpecifier>(binding, {
+						type: 'ImportSpecifier',
+						local: convertIdentifier(binding.propertyName || binding.name),
+						imported: convertIdentifier(binding.name)
+					});
+				}));
+				break;
+
+			default:
+				unexpected(node.namedBindings);
+		}
+	}
+	return specifiers;
+}
+
+function convertExportDeclaration(node: ts.ExportDeclaration) {
+	// TODO
 }
 
 function convertStatement(node: ts.Statement | ts.ModuleElement): ESTree.Statement {
@@ -301,7 +418,8 @@ function convertStatement(node: ts.Statement | ts.ModuleElement): ESTree.Stateme
 			return convertWithStatement(<ts.WithStatement>node);
 
 		case ts.SyntaxKind.ForInStatement:
-			return convertForInStatement(<ts.ForInStatement>node);
+		case ts.SyntaxKind.ForOfStatement:
+			return convertForInOrOfStatement(<ts.ForInStatement | ts.ForOfStatement>node);
 
 		case ts.SyntaxKind.ForStatement:
 			return convertForStatement(<ts.ForStatement>node);
@@ -347,6 +465,9 @@ function convertExpression(node: ts.Expression): ESTree.Expression {
 		case ts.SyntaxKind.ThisKeyword:
 			return wrap<ESTree.ThisExpression>(node, { type: 'ThisExpression' });
 
+		case ts.SyntaxKind.SuperKeyword:
+			return wrap<ESTree.Super>(node, { type: 'Super' });
+
 		case ts.SyntaxKind.Identifier:
 			return convertIdentifier(<ts.Identifier>node);
 
@@ -388,9 +509,28 @@ function convertExpression(node: ts.Expression): ESTree.Expression {
 		case ts.SyntaxKind.ElementAccessExpression:
 			return convertElementAccessExpression(<ts.ElementAccessExpression>node);
 
+		case ts.SyntaxKind.TemplateExpression:
+			return convertTemplateExpression(<ts.TemplateExpression>node);
+
+		case ts.SyntaxKind.SpreadElementExpression:
+			return convertSpreadElementExpression(<ts.SpreadElementExpression>node);
+
+		case ts.SyntaxKind.YieldExpression:
+			return convertYieldExpression(<ts.YieldExpression>node);
+
+		case ts.SyntaxKind.TaggedTemplateExpression:
+			return convertTaggedTemplateExpression(<ts.TaggedTemplateExpression>node);
+
 		default:
 			return convertLiteral(<ts.LiteralExpression>node);
 	}
+}
+
+function convertSpreadElementExpression(node: ts.SpreadElementExpression) {
+	return wrap<ESTree.SpreadElement>(node, {
+		type: 'SpreadElement',
+		argument: convertExpression(node.expression)
+	});
 }
 
 function convertPropertyAccessExpression(node: ts.PropertyAccessExpression) {
@@ -526,7 +666,7 @@ function convertCatchClause(node: ts.CatchClause) {
 function convertYieldExpression(node: ts.YieldExpression) {
 	return wrap<ESTree.YieldExpression>(node, {
 		type: 'YieldExpression',
-		argument: convertExpression(node.expression),
+		argument: convertNullable(node.expression, convertExpression),
 		delegate: !!node.asteriskToken
 	});
 }
@@ -682,9 +822,9 @@ function convertForStatement(node: ts.ForStatement) {
 	});
 }
 
-function convertForInStatement(node: ts.ForInStatement) {
-	return wrap<ESTree.ForInStatement>(node, {
-		type: 'ForInStatement',
+function convertForInOrOfStatement(node: ts.ForInStatement | ts.ForOfStatement) {
+	return wrap<ESTree.ForInStatement | ESTree.ForOfStatement>(node, {
+		type: node.kind === ts.SyntaxKind.ForInStatement ? 'ForInStatement' : 'ForOfStatement',
 		left: convertVariableDeclarationOrExpression(node.initializer),
 		right: convertExpression(node.expression),
 		body: convertStatement(node.statement)
@@ -727,9 +867,9 @@ function convertObjectLiteralElement(node: ts.ObjectLiteralElement) {
 	switch (node.kind) {
 		case ts.SyntaxKind.ShorthandPropertyAssignment:
 		case ts.SyntaxKind.PropertyAssignment:
-		case ts.SyntaxKind.MethodDeclaration:
 			return convertObjectLiteralPropertyElement(<ts_ObjectLiteralPropertyElement>node);
 
+		case ts.SyntaxKind.MethodDeclaration:
 		case ts.SyntaxKind.GetAccessor:
 		case ts.SyntaxKind.SetAccessor:
 			return convertObjectLiteralFunctionLikeElement(<ts_ObjectLiteralFunctionLikeElement>node);
@@ -760,9 +900,7 @@ function convertObjectLiteralPropertyElement(node: ts_ObjectLiteralPropertyEleme
 
 function convertObjectBindingElement(node: ts.BindingElement) {
 	var isShorthand = node.kind === ts.SyntaxKind.ShorthandPropertyAssignment;
-	var value = isShorthand
-		? convertDeclarationName(node.name)
-		: convertExpression(node.initializer);
+	var value = convertIdentifierOrBindingPattern(node.name);
 	if (node.initializer) {
 		value = <ESTree.AssignmentPattern>{
 			type: 'AssignmentPattern',
@@ -772,7 +910,7 @@ function convertObjectBindingElement(node: ts.BindingElement) {
 	}
 	return wrap<ESTree.Property>(node, {
 		type: 'Property',
-		key: convertDeclarationName(node.name),
+		key: convertIdentifierOrBindingPattern(node.propertyName || node.name),
 		value,
 		kind: 'init',
 		method: false,
