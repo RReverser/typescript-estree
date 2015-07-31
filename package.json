@@ -1,0 +1,33 @@
+{
+  "name": "typescript-estree",
+  "version": "1.0.0",
+  "description": "TypeScript => ESTree AST converter",
+  "main": "index.js",
+  "scripts": {
+    "test": "node fuzz"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rreverser/typescript-estree.git"
+  },
+  "keywords": [
+    "typescript",
+    "estree",
+    "spidermonkey",
+    "ast",
+    "converter"
+  ],
+  "author": "Ingvar Stepanyan <me@rreverser.com> (https://rreverser.com/)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/rreverser/typescript-estree/issues"
+  },
+  "homepage": "https://github.com/rreverser/typescript-estree#readme",
+  "dependencies": {
+    "typescript": "^1.5.3"
+  },
+  "devDependencies": {
+    "esfuzz": "^0.3.1",
+    "tslint": "^2.4.2"
+  }
+}
