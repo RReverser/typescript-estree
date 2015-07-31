@@ -1,4 +1,4 @@
-/// <reference path="typings/estree/estree.d.ts" />
+/// <reference path="./estree.d.ts" />
 
 declare module ESTree {
   interface FlowTypeAnnotation extends Node {}
