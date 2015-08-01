@@ -56,12 +56,11 @@ function wrapPos(sourceFile, range, props) {
     props.range = [range.pos, range.end];
     return props;
 }
-function wrap(node, props, usePreciseRange) {
-    var range = usePreciseRange ? {
+function wrap(node, props) {
+    return wrapPos(node.getSourceFile(), {
         pos: node.getStart(),
         end: node.getEnd()
-    } : node;
-    return wrapPos(node.getSourceFile(), range, props);
+    }, props);
 }
 function convertNullable(node, convert) {
     return node != null ? convert(node) : null;
@@ -483,7 +482,7 @@ function convertElementAccessExpression(node) {
     });
 }
 function convertSourceFile(node) {
-    return wrap(node, {
+    return wrapPos(node, node, {
         type: 'Program',
         body: node.statements.map(convertTopStatement),
         sourceType: 'module'
@@ -629,11 +628,12 @@ function convertBinaryExpression(node) {
             });
         case 23 /* CommaToken */: {
             var expressions = [];
+            var expr = node;
             do {
-                expressions.unshift(convertExpression(node.right));
-                node = node.left;
-            } while (node.kind === 170 /* BinaryExpression */ && node.operatorToken.kind === 23 /* CommaToken */);
-            expressions.unshift(convertExpression(node));
+                expressions.unshift(convertExpression(expr.right));
+                expr = expr.left;
+            } while (expr.kind === 170 /* BinaryExpression */ && expr.operatorToken.kind === 23 /* CommaToken */);
+            expressions.unshift(convertExpression(expr));
             return wrap(node, {
                 type: 'SequenceExpression',
                 expressions: expressions

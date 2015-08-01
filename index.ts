@@ -63,12 +63,11 @@ function wrapPos<T extends ESTree.Node>(sourceFile: ts.SourceFile, range: ts.Tex
 	return props;
 }
 
-function wrap<T extends ESTree.Node>(node: ts.Node, props: T, usePreciseRange?: boolean): T {
-	var range: ts.TextRange = usePreciseRange ? {
+function wrap<T extends ESTree.Node>(node: ts.Node, props: T): T {
+	return wrapPos(node.getSourceFile(), {
 		pos: node.getStart(),
 		end: node.getEnd()
-	} : node;
-	return wrapPos(node.getSourceFile(), range, props);
+	}, props);
 }
 
 function convertNullable<From extends ts.Node, To extends ESTree.Node>(node: From, convert: (node: From) => To): To {
@@ -557,7 +556,7 @@ function convertElementAccessExpression(node: ts.ElementAccessExpression) {
 }
 
 export function convertSourceFile(node: ts.SourceFile) {
-	return wrap<ESTree.Program>(node, {
+	return wrapPos<ESTree.Program>(node, node, {
 		type: 'Program',
 		body: node.statements.map(convertTopStatement),
 		sourceType: 'module'
@@ -723,11 +722,12 @@ function convertBinaryExpression(node: ts.BinaryExpression): ESTree.BinaryExpres
 
 		case ts.SyntaxKind.CommaToken: {
 			let expressions: Array<ESTree.Expression> = [];
+			let expr: ts.Expression = node;
 			do {
-				expressions.unshift(convertExpression(node.right));
-				node = <ts.BinaryExpression>node.left;
-			} while (node.kind === ts.SyntaxKind.BinaryExpression && node.operatorToken.kind === ts.SyntaxKind.CommaToken);
-			expressions.unshift(convertExpression(node));
+				expressions.unshift(convertExpression((<ts.BinaryExpression>expr).right));
+				expr = (<ts.BinaryExpression>expr).left;
+			} while (expr.kind === ts.SyntaxKind.BinaryExpression && (<ts.BinaryExpression>expr).operatorToken.kind === ts.SyntaxKind.CommaToken);
+			expressions.unshift(convertExpression(expr));
 			return wrap<ESTree.SequenceExpression>(node, {
 				type: 'SequenceExpression',
 				expressions
