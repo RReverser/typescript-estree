@@ -44,6 +44,7 @@ var SyntaxName: { [kind: number]: string } = (<any>ts).SyntaxKind;
 
 function convertPosition(sourceFile: ts.SourceFile, pos: number): ESTree.Position {
 	var { line, character: column } = sourceFile.getLineAndCharacterOfPosition(pos);
+	line++; // TypeScript uses 0-based lines while ESTree uses 1-based
 	return { line, column };
 }
 
@@ -62,8 +63,12 @@ function wrapPos<T extends ESTree.Node>(sourceFile: ts.SourceFile, range: ts.Tex
 	return props;
 }
 
-function wrap<T extends ESTree.Node>(node: ts.Node, props: T): T {
-	return wrapPos(node.getSourceFile(), node, props);
+function wrap<T extends ESTree.Node>(node: ts.Node, props: T, usePreciseRange?: boolean): T {
+	var range: ts.TextRange = usePreciseRange ? {
+		pos: node.getStart(),
+		end: node.getEnd()
+	} : node;
+	return wrapPos(node.getSourceFile(), range, props);
 }
 
 function convertNullable<From extends ts.Node, To extends ESTree.Node>(node: From, convert: (node: From) => To): To {
@@ -117,7 +122,7 @@ function convertFunctionLikeClassElement(node: ts_FunctionLikeClassElement) {
 			type: 'Identifier',
 			name: node.getFirstToken().getText()
 		}),
-		value: convertFunctionLikeDeclaration(node),
+		value: convertFunctionLikeDeclaration(node, true),
 		computed: node.name != null && node.name.kind === ts.SyntaxKind.ComputedPropertyName,
 		static: !!(node.flags & ts.NodeFlags.Static)
 	});
@@ -577,18 +582,8 @@ export function checkAndConvert(input: string, options?: ts.CompilerOptions) {
         getCurrentDirectory() { return ""; },
         getNewLine() { return "\n"; }
     });
-    /*
-    var diag: Array<ts.Diagnostic> = []
-    	.concat(program.getSyntacticDiagnostics())
-    	.concat(program.getSemanticDiagnostics())
-    	.concat(program.getDeclarationDiagnostics());
-    if (diag.length) {
-		let { line, column } = convertPosition(diag[0].file, diag[0].start);
-		console.warn(`${ts.flattenDiagnosticMessageText(diag[0].messageText, '\n')} at ${line}:${column}`);
-    }
-    */
     program.getSemanticDiagnostics();
-    convertSourceFile(sourceFile);
+    return convertSourceFile(sourceFile);
 }
 
 function convertVariableStatement(node: ts.VariableStatement) {
@@ -715,21 +710,47 @@ function convertNamedUnaryExpression(node: ts_NamedUnaryExpression) {
 	});
 }
 
-function convertBinaryExpression(node: ts.BinaryExpression): ESTree.BinaryExpression | ESTree.LogicalExpression {
-	if (node.operatorToken.kind === ts.SyntaxKind.BarBarToken || node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
-		return wrap<ESTree.LogicalExpression>(node, {
-			type: 'LogicalExpression',
-			operator: node.operatorToken.getText(),
-			left: convertExpression(node.left),
-			right: convertExpression(node.right)
-		});
+function convertBinaryExpression(node: ts.BinaryExpression): ESTree.BinaryExpression | ESTree.LogicalExpression | ESTree.SequenceExpression | ESTree.AssignmentExpression {
+	switch (node.operatorToken.kind) {
+		case ts.SyntaxKind.BarBarToken:
+		case ts.SyntaxKind.AmpersandAmpersandToken:
+			return wrap<ESTree.LogicalExpression>(node, {
+				type: 'LogicalExpression',
+				operator: node.operatorToken.getText(),
+				left: convertExpression(node.left),
+				right: convertExpression(node.right)
+			});
+
+		case ts.SyntaxKind.CommaToken: {
+			let expressions: Array<ESTree.Expression> = [];
+			do {
+				expressions.unshift(convertExpression(node.right));
+				node = <ts.BinaryExpression>node.left;
+			} while (node.kind === ts.SyntaxKind.BinaryExpression && node.operatorToken.kind === ts.SyntaxKind.CommaToken);
+			expressions.unshift(convertExpression(node));
+			return wrap<ESTree.SequenceExpression>(node, {
+				type: 'SequenceExpression',
+				expressions
+			});
+		}
+
+		default:
+			if (isAssignmentOperator(node.operatorToken.kind)) {
+				return wrap<ESTree.AssignmentExpression>(node, {
+					type: 'AssignmentExpression',
+					operator: node.operatorToken.getText(),
+					left: convertExpression(node.left),
+					right: convertExpression(node.right)
+				});
+			} else {
+				return wrap<ESTree.BinaryExpression>(node, {
+					type: 'BinaryExpression',
+					operator: node.operatorToken.getText(),
+					left: convertExpression(node.left),
+					right: convertExpression(node.right)
+				});
+			}
 	}
-	return wrap<ESTree.BinaryExpression>(node, {
-		type: 'BinaryExpression',
-		operator: node.operatorToken.getText(),
-		left: convertExpression(node.left),
-		right: convertExpression(node.right)
-	});
 }
 
 function convertConditionalExpression(node: ts.ConditionalExpression) {
@@ -741,10 +762,10 @@ function convertConditionalExpression(node: ts.ConditionalExpression) {
 	});
 }
 
-function convertFunctionLikeDeclaration(node: ts.FunctionLikeDeclaration) {
+function convertFunctionLikeDeclaration(node: ts.FunctionLikeDeclaration, ignoreId?: boolean) {
 	return wrap<ESTree.FunctionExpression>(node, {
 		type: 'FunctionExpression',
-		id: node.name ? convertIdentifier(<ts.Identifier>node.name) : null,
+		id: !ignoreId && node.name ? convertIdentifier(<ts.Identifier>node.name) : null,
 		params: node.parameters.map(convertParameterDeclaration),
 		body: convertFunctionBody(node.body),
 		generator: !!node.asteriskToken
@@ -925,12 +946,33 @@ function convertObjectLiteralFunctionLikeElement(node: ts_ObjectLiteralFunctionL
 	return wrap<ESTree.Property>(node, {
 		type: 'Property',
 		key: convertDeclarationName(node.name),
-		value: convertFunctionLikeDeclaration(node),
+		value: convertFunctionLikeDeclaration(node, true),
 		kind: node.kind === ts.SyntaxKind.GetAccessor ? 'get' : node.kind === ts.SyntaxKind.SetAccessor ? 'set' : 'init',
 		method: node.kind === ts.SyntaxKind.MethodDeclaration,
 		shorthand: false,
 		computed: node.name.kind === ts.SyntaxKind.ComputedPropertyName
 	});
+}
+
+function isAssignmentOperator(op: ts.SyntaxKind): boolean {
+	switch (op) {
+		case ts.SyntaxKind.EqualsToken:
+		case ts.SyntaxKind.PlusEqualsToken:
+		case ts.SyntaxKind.MinusEqualsToken:
+		case ts.SyntaxKind.AsteriskEqualsToken:
+		case ts.SyntaxKind.SlashEqualsToken:
+		case ts.SyntaxKind.PercentEqualsToken:
+		case ts.SyntaxKind.LessThanLessThanEqualsToken:
+		case ts.SyntaxKind.GreaterThanGreaterThanEqualsToken:
+		case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
+		case ts.SyntaxKind.BarEqualsToken:
+		case ts.SyntaxKind.CaretEqualsToken:
+		case ts.SyntaxKind.AmpersandEqualsToken:
+			return true;
+
+		default:
+			return false;
+	}
 }
 
 function convertUnaryOperator(op: ts.SyntaxKind): ESTree.UnaryOperator {

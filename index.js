@@ -40,6 +40,7 @@ var SyntaxName = ts.SyntaxKind;
 });
 function convertPosition(sourceFile, pos) {
     var _a = sourceFile.getLineAndCharacterOfPosition(pos), line = _a.line, column = _a.character;
+    line++; // TypeScript uses 0-based lines while ESTree uses 1-based
     return { line: line, column: column };
 }
 function unexpected(node) {
@@ -55,8 +56,12 @@ function wrapPos(sourceFile, range, props) {
     props.range = [range.pos, range.end];
     return props;
 }
-function wrap(node, props) {
-    return wrapPos(node.getSourceFile(), node, props);
+function wrap(node, props, usePreciseRange) {
+    var range = usePreciseRange ? {
+        pos: node.getStart(),
+        end: node.getEnd()
+    } : node;
+    return wrapPos(node.getSourceFile(), range, props);
 }
 function convertNullable(node, convert) {
     return node != null ? convert(node) : null;
@@ -113,7 +118,7 @@ function convertFunctionLikeClassElement(node) {
             type: 'Identifier',
             name: node.getFirstToken().getText()
         }),
-        value: convertFunctionLikeDeclaration(node),
+        value: convertFunctionLikeDeclaration(node, true),
         computed: node.name != null && node.name.kind === 128 /* ComputedPropertyName */,
         static: !!(node.flags & 128 /* Static */)
     });
@@ -503,18 +508,8 @@ function checkAndConvert(input, options) {
         getCurrentDirectory: function () { return ""; },
         getNewLine: function () { return "\n"; }
     });
-    /*
-    var diag: Array<ts.Diagnostic> = []
-        .concat(program.getSyntacticDiagnostics())
-        .concat(program.getSemanticDiagnostics())
-        .concat(program.getDeclarationDiagnostics());
-    if (diag.length) {
-        let { line, column } = convertPosition(diag[0].file, diag[0].start);
-        console.warn(`${ts.flattenDiagnosticMessageText(diag[0].messageText, '\n')} at ${line}:${column}`);
-    }
-    */
     program.getSemanticDiagnostics();
-    convertSourceFile(sourceFile);
+    return convertSourceFile(sourceFile);
 }
 exports.checkAndConvert = checkAndConvert;
 function convertVariableStatement(node) {
@@ -623,20 +618,45 @@ function convertNamedUnaryExpression(node) {
     });
 }
 function convertBinaryExpression(node) {
-    if (node.operatorToken.kind === 49 /* BarBarToken */ || node.operatorToken.kind === 48 /* AmpersandAmpersandToken */) {
-        return wrap(node, {
-            type: 'LogicalExpression',
-            operator: node.operatorToken.getText(),
-            left: convertExpression(node.left),
-            right: convertExpression(node.right)
-        });
+    switch (node.operatorToken.kind) {
+        case 49 /* BarBarToken */:
+        case 48 /* AmpersandAmpersandToken */:
+            return wrap(node, {
+                type: 'LogicalExpression',
+                operator: node.operatorToken.getText(),
+                left: convertExpression(node.left),
+                right: convertExpression(node.right)
+            });
+        case 23 /* CommaToken */: {
+            var expressions = [];
+            do {
+                expressions.unshift(convertExpression(node.right));
+                node = node.left;
+            } while (node.kind === 170 /* BinaryExpression */ && node.operatorToken.kind === 23 /* CommaToken */);
+            expressions.unshift(convertExpression(node));
+            return wrap(node, {
+                type: 'SequenceExpression',
+                expressions: expressions
+            });
+        }
+        default:
+            if (isAssignmentOperator(node.operatorToken.kind)) {
+                return wrap(node, {
+                    type: 'AssignmentExpression',
+                    operator: node.operatorToken.getText(),
+                    left: convertExpression(node.left),
+                    right: convertExpression(node.right)
+                });
+            }
+            else {
+                return wrap(node, {
+                    type: 'BinaryExpression',
+                    operator: node.operatorToken.getText(),
+                    left: convertExpression(node.left),
+                    right: convertExpression(node.right)
+                });
+            }
     }
-    return wrap(node, {
-        type: 'BinaryExpression',
-        operator: node.operatorToken.getText(),
-        left: convertExpression(node.left),
-        right: convertExpression(node.right)
-    });
 }
 function convertConditionalExpression(node) {
     return wrap(node, {
@@ -646,10 +666,10 @@ function convertConditionalExpression(node) {
         alternate: convertExpression(node.whenFalse)
     });
 }
-function convertFunctionLikeDeclaration(node) {
+function convertFunctionLikeDeclaration(node, ignoreId) {
     return wrap(node, {
         type: 'FunctionExpression',
-        id: node.name ? convertIdentifier(node.name) : null,
+        id: !ignoreId && node.name ? convertIdentifier(node.name) : null,
         params: node.parameters.map(convertParameterDeclaration),
         body: convertFunctionBody(node.body),
         generator: !!node.asteriskToken
@@ -804,12 +824,31 @@ function convertObjectLiteralFunctionLikeElement(node) {
     return wrap(node, {
         type: 'Property',
         key: convertDeclarationName(node.name),
-        value: convertFunctionLikeDeclaration(node),
+        value: convertFunctionLikeDeclaration(node, true),
         kind: node.kind === 137 /* GetAccessor */ ? 'get' : node.kind === 138 /* SetAccessor */ ? 'set' : 'init',
         method: node.kind === 135 /* MethodDeclaration */,
         shorthand: false,
         computed: node.name.kind === 128 /* ComputedPropertyName */
     });
+}
+function isAssignmentOperator(op) {
+    switch (op) {
+        case 53 /* EqualsToken */:
+        case 54 /* PlusEqualsToken */:
+        case 55 /* MinusEqualsToken */:
+        case 56 /* AsteriskEqualsToken */:
+        case 57 /* SlashEqualsToken */:
+        case 58 /* PercentEqualsToken */:
+        case 59 /* LessThanLessThanEqualsToken */:
+        case 60 /* GreaterThanGreaterThanEqualsToken */:
+        case 61 /* GreaterThanGreaterThanGreaterThanEqualsToken */:
+        case 63 /* BarEqualsToken */:
+        case 64 /* CaretEqualsToken */:
+        case 62 /* AmpersandEqualsToken */:
+            return true;
+        default:
+            return false;
+    }
 }
 function convertUnaryOperator(op) {
     switch (op) {
