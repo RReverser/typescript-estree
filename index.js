@@ -65,7 +65,7 @@ function wrap(node, props) {
 function convertNullable(node, convert) {
     return node != null ? convert(node) : null;
 }
-function convertClassDeclaration(node) {
+function convertClassLikeDeclaration(node, asExpression) {
     var superClass = null;
     (node.heritageClauses || []).some(function (clause) {
         if (clause.token === 79 /* ExtendsKeyword */) {
@@ -77,19 +77,19 @@ function convertClassDeclaration(node) {
         }
     });
     return wrap(node, {
-        type: 'ClassDeclaration',
-        id: convertIdentifier(node.name),
+        type: asExpression ? 'ClassExpression' : 'ClassDeclaration',
+        id: asExpression ? convertNullable(node.name, convertIdentifier) : convertIdentifier(node.name),
         superClass: superClass,
         body: wrapPos(node.getSourceFile(), node.members, {
             type: 'ClassBody',
-            body: node.members.map(convertClassElement)
+            body: node.members.filter(function (element) { return element.kind !== 179 /* SemicolonClassElement */; }).map(convertClassElement)
         })
     });
 }
 function convertClassElement(node) {
-    if (node.kind === 141 /* IndexSignature */ || node.kind === 179 /* SemicolonClassElement */) {
+    if (node.kind === 141 /* IndexSignature */) {
         // TODO
-        return null;
+        unexpected(node);
     }
     return convertFunctionLikeClassElement(node);
 }
@@ -117,7 +117,7 @@ function convertFunctionLikeClassElement(node) {
             type: 'Identifier',
             name: node.getFirstToken().getText()
         }),
-        value: convertFunctionLikeDeclaration(node, true),
+        value: convertFunctionLikeDeclaration(node, 2 /* Ignore */),
         computed: node.name != null && node.name.kind === 128 /* ComputedPropertyName */,
         static: !!(node.flags & 128 /* Static */)
     });
@@ -170,6 +170,58 @@ function convertBindingPattern(node) {
             unexpected(node);
     }
 }
+function convertExpressionAsBindingPattern(node) {
+    switch (node.kind) {
+        case 155 /* ObjectLiteralExpression */:
+            return wrap(node, {
+                type: 'ObjectPattern',
+                properties: node.properties.map(function (node) {
+                    switch (node.kind) {
+                        case 226 /* ShorthandPropertyAssignment */:
+                        case 225 /* PropertyAssignment */: {
+                            var isShorthand = node.kind === 226 /* ShorthandPropertyAssignment */;
+                            return wrap(node, {
+                                type: 'Property',
+                                key: convertDeclarationName(node.name),
+                                value: (isShorthand
+                                    ? convertIdentifier(node.name)
+                                    : convertExpressionAsBindingPattern(node.initializer)),
+                                kind: 'init',
+                                method: false,
+                                shorthand: isShorthand,
+                                computed: node.name.kind === 128 /* ComputedPropertyName */
+                            });
+                        }
+                        default:
+                            unexpected(node);
+                    }
+                })
+            });
+        case 154 /* ArrayLiteralExpression */:
+            return wrap(node, {
+                type: 'ArrayPattern',
+                elements: node.elements.map(function (elem) { return convertNullable(elem, convertExpressionAsBindingPattern); })
+            });
+        case 65 /* Identifier */:
+            return convertIdentifier(node);
+        case 157 /* ElementAccessExpression */:
+            return wrap(node, {
+                type: 'MemberExpression',
+                object: convertExpressionAsBindingPattern(node.expression),
+                property: convertExpression(node.argumentExpression),
+                computed: true
+            });
+        case 156 /* PropertyAccessExpression */:
+            return wrap(node, {
+                type: 'MemberExpression',
+                object: convertExpressionAsBindingPattern(node.expression),
+                property: convertIdentifier(node.name),
+                computed: false
+            });
+        default:
+            unexpected(node);
+    }
+}
 function convertDeclarationName(node) {
     switch (node.kind) {
         case 128 /* ComputedPropertyName */:
@@ -183,7 +235,7 @@ function convertDeclarationName(node) {
 }
 function convertPropertyDeclaration(node) {
     // TODO
-    return null;
+    unexpected(node);
 }
 function convertLiteral(node) {
     var raw = node.getText();
@@ -210,7 +262,7 @@ function convertLiteral(node) {
                             cooked: node.text,
                             raw: raw.slice(1, -1)
                         },
-                        tail: false
+                        tail: true
                     })],
                 expressions: []
             });
@@ -249,25 +301,25 @@ function convertLiteral(node) {
             unexpected(node);
     }
 }
-function convertTemplateSpanLiteral(node) {
+function convertTemplateSpanLiteral(node, isFirst, isLast) {
     return wrap(node, {
         type: 'TemplateElement',
         value: {
             cooked: node.text,
-            raw: node.getText()
+            raw: node.getText().slice(1, isLast ? -1 : -2)
         },
-        tail: false
+        tail: isLast
     });
 }
 function convertTemplateExpression(node) {
-    var quasis = [convertTemplateSpanLiteral(node.head)];
+    var spansCount = node.templateSpans.length;
+    var quasis = [convertTemplateSpanLiteral(node.head, true, spansCount === 0)];
     var expressions = [];
-    node.templateSpans.forEach(function (_a) {
+    node.templateSpans.forEach(function (_a, i) {
         var expression = _a.expression, literal = _a.literal;
         expressions.push(convertExpression(expression));
-        quasis.push(convertTemplateSpanLiteral(literal));
+        quasis.push(convertTemplateSpanLiteral(literal, false, i === spansCount - 1));
     });
-    quasis[quasis.length - 1].tail = true;
     return wrap(node, {
         type: 'TemplateLiteral',
         quasis: quasis,
@@ -291,11 +343,40 @@ function convertExpressionStatement(node) {
     });
 }
 function convertTopStatement(node) {
+    if (node.flags & 1 /* Export */) {
+        if (node.flags & 256 /* Default */) {
+            var declaration;
+            switch (node.kind) {
+                case 201 /* FunctionDeclaration */:
+                    declaration = convertFunction(node, node.name ? 'FunctionDeclaration' : 'FunctionExpression', 0 /* AllowMissing */);
+                    break;
+                case 202 /* ClassDeclaration */:
+                    declaration = convertClassLikeDeclaration(node, !node.name);
+                    break;
+                default:
+                    unexpected(node);
+            }
+            return wrap(node, {
+                type: 'ExportDefaultDeclaration',
+                declaration: declaration
+            });
+        }
+        else {
+            return wrap(node, {
+                type: 'ExportNamedDeclaration',
+                declaration: convertStatement(node),
+                specifiers: [],
+                source: null
+            });
+        }
+    }
     switch (node.kind) {
         case 210 /* ImportDeclaration */:
             return convertImportDeclaration(node);
         case 216 /* ExportDeclaration */:
             return convertExportDeclaration(node);
+        case 215 /* ExportAssignment */:
+            return convertExportAssignment(node);
         default:
             return convertStatement(node);
     }
@@ -333,8 +414,8 @@ function convertImportClause(node) {
                 specifiers = specifiers.concat(namedBindings.elements.map(function (binding) {
                     return wrap(binding, {
                         type: 'ImportSpecifier',
-                        local: convertIdentifier(binding.propertyName || binding.name),
-                        imported: convertIdentifier(binding.name)
+                        local: convertIdentifier(binding.name),
+                        imported: convertIdentifier(binding.propertyName || binding.name)
                     });
                 }));
                 break;
@@ -345,7 +426,42 @@ function convertImportClause(node) {
     return specifiers;
 }
 function convertExportDeclaration(node) {
-    // TODO
+    var source;
+    if (node.moduleSpecifier) {
+        if (node.moduleSpecifier.kind !== 8 /* StringLiteral */) {
+            unexpected(node.moduleSpecifier);
+        }
+        source = convertLiteral(node.moduleSpecifier);
+    }
+    else {
+        source = null;
+    }
+    if (!node.exportClause) {
+        return wrap(node, {
+            type: 'ExportAllDeclaration',
+            source: source
+        });
+    }
+    else {
+        return wrap(node, {
+            type: 'ExportNamedDeclaration',
+            declaration: null,
+            specifiers: node.exportClause.elements.map(function (element) {
+                return wrap(element, {
+                    type: 'ExportSpecifier',
+                    local: convertIdentifier(element.propertyName || element.name),
+                    exported: convertIdentifier(element.name)
+                });
+            }),
+            source: source
+        });
+    }
+}
+function convertExportAssignment(node) {
+    return wrap(node, {
+        type: 'ExportDefaultDeclaration',
+        declaration: convertExpression(node.expression)
+    });
 }
 function convertStatement(node) {
     switch (node.kind) {
@@ -360,7 +476,7 @@ function convertStatement(node) {
         case 201 /* FunctionDeclaration */:
             return convertFunctionDeclaration(node);
         case 202 /* ClassDeclaration */:
-            return convertClassDeclaration(node);
+            return convertClassLikeDeclaration(node);
         case 198 /* DebuggerStatement */:
             return wrap(node, { type: 'DebuggerStatement' });
         case 182 /* EmptyStatement */:
@@ -441,8 +557,11 @@ function convertExpression(node) {
         case 155 /* ObjectLiteralExpression */:
             return convertObjectLiteralExpression(node);
         case 164 /* ArrowFunction */:
+            return convertArrowFunction(node);
         case 163 /* FunctionExpression */:
             return convertFunctionLikeDeclaration(node);
+        case 175 /* ClassExpression */:
+            return convertClassLikeDeclaration(node);
         case 156 /* PropertyAccessExpression */:
             return convertPropertyAccessExpression(node);
         case 157 /* ElementAccessExpression */:
@@ -644,7 +763,7 @@ function convertBinaryExpression(node) {
                 return wrap(node, {
                     type: 'AssignmentExpression',
                     operator: node.operatorToken.getText(),
-                    left: convertExpression(node.left),
+                    left: convertExpressionAsBindingPattern(node.left),
                     right: convertExpression(node.right)
                 });
             }
@@ -666,26 +785,30 @@ function convertConditionalExpression(node) {
         alternate: convertExpression(node.whenFalse)
     });
 }
-function convertFunctionLikeDeclaration(node, ignoreId) {
+function convertFunction(node, type, idBehavior, allowExpressionBody) {
+    var body = node.body;
+    if (body.kind !== 180 /* Block */ && !allowExpressionBody) {
+        unexpected(body);
+    }
     return wrap(node, {
-        type: 'FunctionExpression',
-        id: !ignoreId && node.name ? convertIdentifier(node.name) : null,
+        type: type,
+        id: idBehavior === 1 /* Enforce */ || idBehavior === 0 /* AllowMissing */ && node.name ? convertIdentifier(node.name) : null,
         params: node.parameters.map(convertParameterDeclaration),
-        body: convertFunctionBody(node.body),
+        body: body.kind === 180 /* Block */ ? convertBlock(body) : convertExpression(body),
         generator: !!node.asteriskToken
     });
+}
+function convertFunctionLikeDeclaration(node, idBehavior) {
+    if (idBehavior === void 0) { idBehavior = 0 /* AllowMissing */; }
+    return convertFunction(node, 'FunctionExpression', idBehavior);
+}
+function convertArrowFunction(node) {
+    var arrowFn = convertFunction(node, 'ArrowFunctionExpression', 2 /* Ignore */, true);
+    arrowFn.expression = node.body.kind !== 180 /* Block */;
+    return arrowFn;
 }
 function convertFunctionDeclaration(node) {
-    return wrap(node, {
-        type: 'FunctionDeclaration',
-        id: convertIdentifier(node.name),
-        params: node.parameters.map(convertParameterDeclaration),
-        body: convertBlock(node.body),
-        generator: !!node.asteriskToken
-    });
-}
-function convertFunctionBody(node) {
-    return node.kind === 180 /* Block */ ? convertBlock(node) : convertExpression(node);
+    return convertFunction(node, 'FunctionDeclaration', 1 /* Enforce */);
 }
 function convertParameterDeclaration(node) {
     var name = convertDeclarationName(node.name);
@@ -801,7 +924,7 @@ function convertObjectLiteralPropertyElement(node) {
     });
 }
 function convertObjectBindingElement(node) {
-    var isShorthand = node.kind === 226 /* ShorthandPropertyAssignment */;
+    var isShorthand = !node.propertyName;
     var value = convertIdentifierOrBindingPattern(node.name);
     if (node.initializer) {
         value = {
@@ -824,7 +947,7 @@ function convertObjectLiteralFunctionLikeElement(node) {
     return wrap(node, {
         type: 'Property',
         key: convertDeclarationName(node.name),
-        value: convertFunctionLikeDeclaration(node, true),
+        value: convertFunctionLikeDeclaration(node, 2 /* Ignore */),
         kind: node.kind === 137 /* GetAccessor */ ? 'get' : node.kind === 138 /* SetAccessor */ ? 'set' : 'init',
         method: node.kind === 135 /* MethodDeclaration */,
         shorthand: false,

@@ -74,7 +74,7 @@ function convertNullable<From extends ts.Node, To extends ESTree.Node>(node: Fro
 	return node != null ? convert(node) : null;
 }
 
-function convertClassDeclaration(node: ts.ClassDeclaration) {
+function convertClassLikeDeclaration(node: ts.ClassLikeDeclaration, asExpression?: boolean) {
 	var superClass: ESTree.Expression = null;
 	(node.heritageClauses || []).some(clause => {
 		if (clause.token === ts.SyntaxKind.ExtendsKeyword) {
@@ -84,13 +84,13 @@ function convertClassDeclaration(node: ts.ClassDeclaration) {
 			return false;
 		}
 	});
-	return wrap<ESTree.ClassDeclaration>(node, {
-		type: 'ClassDeclaration',
-		id: convertIdentifier(node.name),
+	return wrap<ESTree.Class>(node, {
+		type: asExpression ? 'ClassExpression' : 'ClassDeclaration',
+		id: asExpression ? convertNullable(node.name, convertIdentifier) : convertIdentifier(node.name),
 		superClass,
 		body: wrapPos<ESTree.ClassBody>(node.getSourceFile(), node.members, {
 			type: 'ClassBody',
-			body: node.members.map(convertClassElement)
+			body: node.members.filter(element => element.kind !== ts.SyntaxKind.SemicolonClassElement).map(convertClassElement)
 		})
 	});
 }
@@ -98,9 +98,9 @@ function convertClassDeclaration(node: ts.ClassDeclaration) {
 type ts_FunctionLikeClassElement = ts.MethodDeclaration | ts.ConstructorDeclaration | ts.AccessorDeclaration;
 
 function convertClassElement(node: ts.ClassElement) {
-	if (node.kind === ts.SyntaxKind.IndexSignature || node.kind === ts.SyntaxKind.SemicolonClassElement) {
+	if (node.kind === ts.SyntaxKind.IndexSignature) {
 		// TODO
-		return null;
+		unexpected(node);
 	}
 	return convertFunctionLikeClassElement(<ts_FunctionLikeClassElement>node);
 }
@@ -121,7 +121,7 @@ function convertFunctionLikeClassElement(node: ts_FunctionLikeClassElement) {
 			type: 'Identifier',
 			name: node.getFirstToken().getText()
 		}),
-		value: convertFunctionLikeDeclaration(node, true),
+		value: convertFunctionLikeDeclaration(node, IdBehavior.Ignore),
 		computed: node.name != null && node.name.kind === ts.SyntaxKind.ComputedPropertyName,
 		static: !!(node.flags & ts.NodeFlags.Static)
 	});
@@ -179,6 +179,67 @@ function convertBindingPattern(node: ts.BindingPattern): ESTree.Pattern {
 	}
 }
 
+function convertExpressionAsBindingPattern(node: ts.Expression): ESTree.Pattern {
+	switch (node.kind) {
+		case ts.SyntaxKind.ObjectLiteralExpression:
+			return wrap<ESTree.ObjectPattern>(node, {
+				type: 'ObjectPattern',
+				properties: (<ts.ObjectLiteralExpression>node).properties.map(node => {
+					switch (node.kind) {
+						case ts.SyntaxKind.ShorthandPropertyAssignment:
+						case ts.SyntaxKind.PropertyAssignment: {
+							var isShorthand = node.kind === ts.SyntaxKind.ShorthandPropertyAssignment;
+							return wrap<ESTree.Property>(node, {
+								type: 'Property',
+								key: convertDeclarationName(node.name),
+								value: (
+									isShorthand
+										? convertIdentifier((<ts.ShorthandPropertyAssignment>node).name)
+										: convertExpressionAsBindingPattern((<ts.PropertyAssignment>node).initializer)
+									),
+								kind: 'init',
+								method: false,
+								shorthand: isShorthand,
+								computed: node.name.kind === ts.SyntaxKind.ComputedPropertyName
+							});
+						}
+
+						default:
+							unexpected(node);
+					}
+				})
+			});
+
+		case ts.SyntaxKind.ArrayLiteralExpression:
+			return wrap<ESTree.ArrayPattern>(node, {
+				type: 'ArrayPattern',
+				elements: (<ts.ArrayLiteralExpression>node).elements.map(elem => convertNullable(elem, convertExpressionAsBindingPattern))
+			});
+
+		case ts.SyntaxKind.Identifier:
+			return convertIdentifier(<ts.Identifier>node);
+
+		case ts.SyntaxKind.ElementAccessExpression:
+			return wrap<ESTree.MemberExpression>(node, {
+				type: 'MemberExpression',
+				object: convertExpressionAsBindingPattern((<ts.ElementAccessExpression>node).expression),
+				property: convertExpression((<ts.ElementAccessExpression>node).argumentExpression),
+				computed: true
+			});
+
+		case ts.SyntaxKind.PropertyAccessExpression:
+			return wrap<ESTree.MemberExpression>(node, {
+				type: 'MemberExpression',
+				object: convertExpressionAsBindingPattern((<ts.PropertyAccessExpression>node).expression),
+				property: convertIdentifier((<ts.PropertyAccessExpression>node).name),
+				computed: false
+			});
+
+		default:
+			unexpected(node);
+	}
+}
+
 function convertDeclarationName(node: ts.DeclarationName) {
 	switch (node.kind) {
 		case ts.SyntaxKind.ComputedPropertyName:
@@ -195,7 +256,7 @@ function convertDeclarationName(node: ts.DeclarationName) {
 
 function convertPropertyDeclaration(node: ts.PropertyDeclaration): ESTree.MethodDefinition {
 	// TODO
-	return null;
+	unexpected(node);
 }
 
 function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
@@ -225,7 +286,7 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
 						cooked: node.text,
 						raw: raw.slice(1, -1)
 					},
-					tail: false
+					tail: true
 				})],
 				expressions: []
 			});
@@ -268,25 +329,25 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
     }
 }
 
-function convertTemplateSpanLiteral(node: ts.LiteralExpression) {
+function convertTemplateSpanLiteral(node: ts.LiteralExpression, isFirst: boolean, isLast: boolean) {
 	return wrap<ESTree.TemplateElement>(node, {
 		type: 'TemplateElement',
 		value: {
 			cooked: node.text,
-			raw: node.getText()
+			raw: node.getText().slice(1, isLast ? -1 : -2)
 		},
-		tail: false
+		tail: isLast
 	});
 }
 
 function convertTemplateExpression(node: ts.TemplateExpression) {
-	var quasis = [convertTemplateSpanLiteral(node.head)];
+	var spansCount = node.templateSpans.length;
+	var quasis = [convertTemplateSpanLiteral(node.head, true, spansCount === 0)];
 	var expressions: Array<ESTree.Expression> = [];
-	node.templateSpans.forEach(({ expression, literal }) => {
+	node.templateSpans.forEach(({ expression, literal }, i) => {
 		expressions.push(convertExpression(expression));
-		quasis.push(convertTemplateSpanLiteral(literal));
+		quasis.push(convertTemplateSpanLiteral(literal, false, i === spansCount - 1));
 	});
-	quasis[quasis.length - 1].tail = true;
 	return wrap<ESTree.TemplateLiteral>(node, {
 		type: 'TemplateLiteral',
 		quasis,
@@ -313,12 +374,43 @@ function convertExpressionStatement(node: ts.ExpressionStatement) {
 }
 
 function convertTopStatement(node: ts.ModuleElement): ESTree.Statement | ESTree.ModuleDeclaration {
+	if (node.flags & ts.NodeFlags.Export) {
+		if (node.flags & ts.NodeFlags.Default) {
+			let declaration: ESTree.Declaration | ESTree.Expression;
+			switch (node.kind) {
+				case ts.SyntaxKind.FunctionDeclaration:
+					declaration = convertFunction(<ts.FunctionDeclaration>node, (<ts.FunctionDeclaration>node).name ? 'FunctionDeclaration' : 'FunctionExpression', IdBehavior.AllowMissing);
+					break;
+
+				case ts.SyntaxKind.ClassDeclaration:
+					declaration = convertClassLikeDeclaration(<ts.ClassDeclaration>node, !(<ts.ClassDeclaration>node).name);
+					break;
+
+				default:
+					unexpected(node);
+			}
+			return wrap<ESTree.ExportDefaultDeclaration>(node, {
+				type: 'ExportDefaultDeclaration',
+				declaration
+			});
+		} else {
+			return wrap<ESTree.ExportNamedDeclaration>(node, {
+				type: 'ExportNamedDeclaration',
+				declaration: convertStatement(node),
+				specifiers: [],
+				source: null
+			});
+		}
+	}
 	switch (node.kind) {
 		case ts.SyntaxKind.ImportDeclaration:
 			return convertImportDeclaration(<ts.ImportDeclaration>node);
 
 		case ts.SyntaxKind.ExportDeclaration:
 			return convertExportDeclaration(<ts.ExportDeclaration>node);
+
+		case ts.SyntaxKind.ExportAssignment:
+			return convertExportAssignment(<ts.ExportAssignment>node);
 
 		default:
 			return convertStatement(node);
@@ -359,8 +451,8 @@ function convertImportClause(node: ts.ImportClause) {
 				specifiers = specifiers.concat((<ts.NamedImports>namedBindings).elements.map(binding => {
 					return wrap<ESTree.ImportSpecifier>(binding, {
 						type: 'ImportSpecifier',
-						local: convertIdentifier(binding.propertyName || binding.name),
-						imported: convertIdentifier(binding.name)
+						local: convertIdentifier(binding.name),
+						imported: convertIdentifier(binding.propertyName || binding.name)
 					});
 				}));
 				break;
@@ -372,8 +464,42 @@ function convertImportClause(node: ts.ImportClause) {
 	return specifiers;
 }
 
-function convertExportDeclaration(node: ts.ExportDeclaration) {
-	// TODO
+function convertExportDeclaration(node: ts.ExportDeclaration): ESTree.ExportAllDeclaration | ESTree.ExportNamedDeclaration {
+	var source: ESTree.Literal;
+	if (node.moduleSpecifier) {
+		if (node.moduleSpecifier.kind !== ts.SyntaxKind.StringLiteral) {
+			unexpected(node.moduleSpecifier);
+		}
+		source = convertLiteral(<ts.LiteralExpression>node.moduleSpecifier);
+	} else {
+		source = null;
+	}
+	if (!node.exportClause) {
+		return wrap<ESTree.ExportAllDeclaration>(node, {
+			type: 'ExportAllDeclaration',
+			source
+		});
+	} else {
+		return wrap<ESTree.ExportNamedDeclaration>(node, {
+			type: 'ExportNamedDeclaration',
+			declaration: null,
+			specifiers: node.exportClause.elements.map(element => {
+				return wrap<ESTree.ExportSpecifier>(element, {
+					type: 'ExportSpecifier',
+					local: convertIdentifier(element.propertyName || element.name),
+					exported: convertIdentifier(element.name)
+				});
+			}),
+			source
+		});
+	}
+}
+
+function convertExportAssignment(node: ts.ExportAssignment): ESTree.ExportNamedDeclaration | ESTree.ExportDefaultDeclaration {
+	return wrap<ESTree.ExportDefaultDeclaration>(node, {
+		type: 'ExportDefaultDeclaration',
+		declaration: convertExpression(node.expression)
+	});
 }
 
 function convertStatement(node: ts.Statement | ts.ModuleElement): ESTree.Statement {
@@ -394,7 +520,7 @@ function convertStatement(node: ts.Statement | ts.ModuleElement): ESTree.Stateme
 			return convertFunctionDeclaration(<ts.FunctionDeclaration>node);
 
 		case ts.SyntaxKind.ClassDeclaration:
-			return convertClassDeclaration(<ts.ClassDeclaration>node);
+			return convertClassLikeDeclaration(<ts.ClassDeclaration>node);
 
 		case ts.SyntaxKind.DebuggerStatement:
 			return wrap<ESTree.DebuggerStatement>(node, { type: 'DebuggerStatement' });
@@ -504,8 +630,13 @@ function convertExpression(node: ts.Expression): ESTree.Expression {
 			return convertObjectLiteralExpression(<ts.ObjectLiteralExpression>node);
 
 		case ts.SyntaxKind.ArrowFunction:
+			return convertArrowFunction(<ts.ArrowFunction>node);
+
 		case ts.SyntaxKind.FunctionExpression:
 			return convertFunctionLikeDeclaration(<ts.FunctionExpression>node);
+
+		case ts.SyntaxKind.ClassExpression:
+			return convertClassLikeDeclaration(<ts.ClassExpression>node);
 
 		case ts.SyntaxKind.PropertyAccessExpression:
 			return convertPropertyAccessExpression(<ts.PropertyAccessExpression>node);
@@ -739,7 +870,7 @@ function convertBinaryExpression(node: ts.BinaryExpression): ESTree.BinaryExpres
 				return wrap<ESTree.AssignmentExpression>(node, {
 					type: 'AssignmentExpression',
 					operator: node.operatorToken.getText(),
-					left: convertExpression(node.left),
+					left: convertExpressionAsBindingPattern(node.left),
 					right: convertExpression(node.right)
 				});
 			} else {
@@ -762,28 +893,38 @@ function convertConditionalExpression(node: ts.ConditionalExpression) {
 	});
 }
 
-function convertFunctionLikeDeclaration(node: ts.FunctionLikeDeclaration, ignoreId?: boolean) {
-	return wrap<ESTree.FunctionExpression>(node, {
-		type: 'FunctionExpression',
-		id: !ignoreId && node.name ? convertIdentifier(<ts.Identifier>node.name) : null,
+const enum IdBehavior {
+	AllowMissing,
+	Enforce,
+	Ignore
+}
+
+function convertFunction(node: ts.FunctionLikeDeclaration, type: string, idBehavior: IdBehavior, allowExpressionBody?: boolean) {
+	var { body } = node;
+	if (body.kind !== ts.SyntaxKind.Block && !allowExpressionBody) {
+		unexpected(body);
+	}
+	return wrap<ESTree.Function>(node, {
+		type,
+		id: idBehavior === IdBehavior.Enforce || idBehavior === IdBehavior.AllowMissing && node.name ? convertIdentifier(<ts.Identifier>node.name) : null,
 		params: node.parameters.map(convertParameterDeclaration),
-		body: convertFunctionBody(node.body),
+		body: body.kind === ts.SyntaxKind.Block ? convertBlock(<ts.Block>body) : convertExpression(<ts.Expression>body),
 		generator: !!node.asteriskToken
 	});
+}
+
+function convertFunctionLikeDeclaration(node: ts.FunctionLikeDeclaration, idBehavior: IdBehavior = IdBehavior.AllowMissing) {
+	return <ESTree.FunctionExpression>convertFunction(node, 'FunctionExpression', idBehavior);
+}
+
+function convertArrowFunction(node: ts.ArrowFunction) {
+	var arrowFn = <ESTree.ArrowFunctionExpression>convertFunction(node, 'ArrowFunctionExpression', IdBehavior.Ignore, true);
+	arrowFn.expression = node.body.kind !== ts.SyntaxKind.Block;
+	return arrowFn;
 }
 
 function convertFunctionDeclaration(node: ts.FunctionDeclaration) {
-	return wrap<ESTree.FunctionDeclaration>(node, {
-		type: 'FunctionDeclaration',
-		id: convertIdentifier(node.name),
-		params: node.parameters.map(convertParameterDeclaration),
-		body: convertBlock(node.body),
-		generator: !!node.asteriskToken
-	});
-}
-
-function convertFunctionBody(node: ts.Block | ts.Expression) {
-	return node.kind === ts.SyntaxKind.Block ? convertBlock(<ts.Block>node) : convertExpression(<ts.Expression>node);
+	return <ESTree.FunctionDeclaration>convertFunction(node, 'FunctionDeclaration', IdBehavior.Enforce);
 }
 
 function convertParameterDeclaration(node: ts.ParameterDeclaration): ESTree.Pattern {
@@ -920,7 +1061,7 @@ function convertObjectLiteralPropertyElement(node: ts_ObjectLiteralPropertyEleme
 }
 
 function convertObjectBindingElement(node: ts.BindingElement) {
-	var isShorthand = node.kind === ts.SyntaxKind.ShorthandPropertyAssignment;
+	var isShorthand = !node.propertyName;
 	var value = convertIdentifierOrBindingPattern(node.name);
 	if (node.initializer) {
 		value = <ESTree.AssignmentPattern>{
@@ -946,7 +1087,7 @@ function convertObjectLiteralFunctionLikeElement(node: ts_ObjectLiteralFunctionL
 	return wrap<ESTree.Property>(node, {
 		type: 'Property',
 		key: convertDeclarationName(node.name),
-		value: convertFunctionLikeDeclaration(node, true),
+		value: convertFunctionLikeDeclaration(node, IdBehavior.Ignore),
 		kind: node.kind === ts.SyntaxKind.GetAccessor ? 'get' : node.kind === ts.SyntaxKind.SetAccessor ? 'set' : 'init',
 		method: node.kind === ts.SyntaxKind.MethodDeclaration,
 		shorthand: false,

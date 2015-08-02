@@ -20,7 +20,16 @@ interface PathItem {
 	key: string;
 	src: any;
 	gen: any;
-	code?: string;
+}
+
+interface NodePathItem extends PathItem {
+	key: string;
+	src: ESTree.Node;
+	gen: ESTree.Node;
+}
+
+interface ProgramPathItem extends NodePathItem {
+	code: string;
 }
 
 function diffAST(path: Array<PathItem>) {
@@ -28,18 +37,31 @@ function diffAST(path: Array<PathItem>) {
 	var src = last.src;
 	var gen = last.gen;
 	if (typeof src !== 'object' || src === null || typeof gen !== 'object' || gen === null) {
-		if (src !== gen) {
-			var owner = path.length >= 2 ? path[path.length - 2] : last;
+		if (src != gen) {
+			var owner = <NodePathItem>last;
+			if (path.length >= 2) {
+				owner = path[path.length - 2];
+				if (path[path.length - 2].src.type === 'MethodDefinition' && path[path.length - 1].key === 'kind') {
+					// KNOWN
+					return;
+				}
+				if (path.length >= 3 && path[path.length - 3].src.type) {
+					owner = path[path.length - 3];
+				}
+			}
 			console.warn({
 				path: path.map(function (item) {
 					return item.key;
 				}).join('.'),
-				src: owner.src,
-				gen: owner.gen
+				srcCode: (<ProgramPathItem>path[0]).code.slice(owner.src.range[0], owner.src.range[1]),
+				genCode: (<ProgramPathItem>path[0]).code.slice(owner.gen.range[0], owner.gen.range[1]),
+				srcValue: src,
+				genValue: gen
 			});
 		}
 		return;
 	}
+	/*
 	if (src.range && gen.range && (src.range[0] !== gen.range[0] || src.range[1] !== gen.range[1])) {
 		console.warn({
 			path: path.map(function (item) {
@@ -49,6 +71,7 @@ function diffAST(path: Array<PathItem>) {
 			genCovers: path[0].code.slice(gen.range[0], gen.range[1])
 		});
 	}
+	*/
 	for (var key in src) {
 		var newSrc = <ESTree.Node>(<any>src)[key];
 		var newGen = <ESTree.Node>(<any>gen)[key];
@@ -83,6 +106,6 @@ function test(name: string, version: number, sourceType?: string) {
 	}]);
 }
 
-test('es5', 5);
+//test('es5', 5);
 //test('es2015-script', 6, 'script');
-//test('es2015-module', 6, 'module');
+test('es2015-module', 6, 'module');

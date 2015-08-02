@@ -21,9 +21,7 @@ export function e11(){}
 export function* e12(){}
 export class e13 {}
 export class e14 extends e15 {}
-export default function e16(){}
 // Unfortunately (for us), we can only have a single default export.
-/*
 export default function (){}
 export default function* i16(){}
 export default function* (){}
@@ -31,9 +29,9 @@ export default class i17 {}
 export default class i18 extends i19 {}
 export default class {}
 export default x = 0;
+export default function e16(){}
 export default 0;
 export default (0, 1);
-*/
 
 // whitespace
 tab:for(;;)break	tab;
@@ -46,17 +44,18 @@ bom:for(;;)break﻿bom;
 // line terminators
 lineFeed:0
 0;
-carriageReturn:00;
+carriageReturn:0
+0;
 carriageReturnLineFeed:0
 0;
 lineSeparator:0 0;
 paragraphSeparator:0 0;
 
 // identifier names
-var $, _, \u0078, \u{2F9F9}, x$, x_, x\u0030, x\u{e01d5}, xa, x0, x0a,
+var $, _/*UNSUPPORTED: , \u0078, \u{2F9F9}*/, x$, x_/*UNSUPPORTED: x\u0030, x\u{e01d5}*/, xa, x0, x0a,
   x0123456789, qwertyuiopasdfghjklzxcvbnm, QWERTYUIOPASDFGHJKLZXCVBNM;
 // a representative sample of ID_Start and ID_Continue
-var 䩶, x󠇕, œ一, ǻ둘, ɤ〩, φ, ﬁⅷ, ユニコード, x‌‍;
+var /*UNSUPPORTED: 䩶, x󠇕, œ一, ǻ둘, ɤ〩, φ, ﬁⅷ, ユニコード, */x‌‍;
 let letx; let[x\u0078] = 0; const constx = 0;
 { let x; let y = 0; const z = 0; }
 
@@ -259,7 +258,7 @@ try{}catch({e}){}
 class A {}
 class B extends new A {
   constructor(a, b = 0, [c,, d = 0, ...e], {f, g: h, i = 0, i: j = 0}, ...k) {
-    super(new.target);
+    /*UNSUPPORTED: super(new.target);*/
     super()`template`;
     () => super(this);
   }

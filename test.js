@@ -13,18 +13,31 @@ function diffAST(path) {
     var src = last.src;
     var gen = last.gen;
     if (typeof src !== 'object' || src === null || typeof gen !== 'object' || gen === null) {
-        if (src !== gen) {
-            var owner = path.length >= 2 ? path[path.length - 2] : last;
+        if (src != gen) {
+            var owner = last;
+            if (path.length >= 2) {
+                owner = path[path.length - 2];
+                if (path[path.length - 2].src.type === 'MethodDefinition' && path[path.length - 1].key === 'kind') {
+                    // KNOWN
+                    return;
+                }
+                if (path.length >= 3 && path[path.length - 3].src.type) {
+                    owner = path[path.length - 3];
+                }
+            }
             console.warn({
                 path: path.map(function (item) {
                     return item.key;
                 }).join('.'),
-                src: owner.src,
-                gen: owner.gen
+                srcCode: path[0].code.slice(owner.src.range[0], owner.src.range[1]),
+                genCode: path[0].code.slice(owner.gen.range[0], owner.gen.range[1]),
+                srcValue: src,
+                genValue: gen
             });
         }
         return;
     }
+    /*
     if (src.range && gen.range && (src.range[0] !== gen.range[0] || src.range[1] !== gen.range[1])) {
         console.warn({
             path: path.map(function (item) {
@@ -34,6 +47,7 @@ function diffAST(path) {
             genCovers: path[0].code.slice(gen.range[0], gen.range[1])
         });
     }
+    */
     for (var key in src) {
         var newSrc = src[key];
         var newGen = gen[key];
@@ -66,6 +80,7 @@ function test(name, version, sourceType) {
             code: sourceCode
         }]);
 }
-test('es5', 5);
+//test('es5', 5);
 //test('es2015-script', 6, 'script');
-//test('es2015-module', 6, 'module');
+test('es2015-module', 6, 'module');
+//# sourceMappingURL=test.js.map
