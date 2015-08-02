@@ -47,7 +47,8 @@ function unexpected(node) {
     var _a = convertPosition(node.getSourceFile(), node.pos), line = _a.line, column = _a.column;
     throw new TypeError("Unexpected node type " + SyntaxName[node.kind] + " (" + line + ":" + column + ")");
 }
-function wrapPos(sourceFile, range, props) {
+function wrapPos(owner, range, props) {
+    var sourceFile = owner.getSourceFile();
     props.loc = {
         source: sourceFile.fileName,
         start: convertPosition(sourceFile, range.pos),
@@ -57,7 +58,7 @@ function wrapPos(sourceFile, range, props) {
     return props;
 }
 function wrap(node, props) {
-    return wrapPos(node.getSourceFile(), {
+    return wrapPos(node, {
         pos: node.getStart(),
         end: node.getEnd()
     }, props);
@@ -80,7 +81,7 @@ function convertClassLikeDeclaration(node, asExpression) {
         type: asExpression ? 'ClassExpression' : 'ClassDeclaration',
         id: asExpression ? convertNullable(node.name, convertIdentifier) : convertIdentifier(node.name),
         superClass: superClass,
-        body: wrapPos(node.getSourceFile(), node.members, {
+        body: wrapPos(node, node.members, {
             type: 'ClassBody',
             body: node.members.filter(function (element) { return element.kind !== 179 /* SemicolonClassElement */; }).map(convertClassElement)
         })
@@ -113,7 +114,7 @@ function convertFunctionLikeClassElement(node) {
     return wrap(node, {
         type: 'MethodDefinition',
         kind: kind,
-        key: node.name ? convertDeclarationName(node.name) : wrap(node.getFirstToken(), {
+        key: node.kind !== 136 /* Constructor */ ? convertDeclarationName(node.name) : wrap(node.getFirstToken(), {
             type: 'Identifier',
             name: node.getFirstToken().getText()
         }),
@@ -256,7 +257,10 @@ function convertLiteral(node) {
         case 10 /* NoSubstitutionTemplateLiteral */:
             return wrap(node, {
                 type: 'TemplateLiteral',
-                quasis: [wrap(node, {
+                quasis: [wrapPos(node, {
+                        pos: node.getStart() + 1,
+                        end: node.getEnd() - 1
+                    }, {
                         type: 'TemplateElement',
                         value: {
                             cooked: node.text,
@@ -302,7 +306,10 @@ function convertLiteral(node) {
     }
 }
 function convertTemplateSpanLiteral(node, isFirst, isLast) {
-    return wrap(node, {
+    return wrapPos(node, {
+        pos: node.getStart() + 1,
+        end: node.getEnd() - (isLast ? 1 : 2)
+    }, {
         type: 'TemplateElement',
         value: {
             cooked: node.text,
@@ -846,7 +853,7 @@ function convertWhileStatement(node) {
 }
 function convertVariableDeclarationOrExpression(node) {
     return node.kind === 200 /* VariableDeclarationList */
-        ? wrapPos(node.getSourceFile(), node, {
+        ? wrapPos(node, node, {
             type: 'VariableDeclaration',
             kind: 'var',
             declarations: node.declarations.map(convertVariableDeclaration)

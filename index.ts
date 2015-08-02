@@ -53,7 +53,8 @@ function unexpected(node: ts.Node) {
 	throw new TypeError(`Unexpected node type ${SyntaxName[node.kind]} (${line}:${column})`);
 }
 
-function wrapPos<T extends ESTree.Node>(sourceFile: ts.SourceFile, range: ts.TextRange, props: T): T {
+function wrapPos<T extends ESTree.Node>(owner: ts.Node, range: ts.TextRange, props: T): T {
+	var sourceFile = owner.getSourceFile();
 	props.loc = {
 		source: sourceFile.fileName,
 		start: convertPosition(sourceFile, range.pos),
@@ -64,7 +65,7 @@ function wrapPos<T extends ESTree.Node>(sourceFile: ts.SourceFile, range: ts.Tex
 }
 
 function wrap<T extends ESTree.Node>(node: ts.Node, props: T): T {
-	return wrapPos(node.getSourceFile(), {
+	return wrapPos(node, {
 		pos: node.getStart(),
 		end: node.getEnd()
 	}, props);
@@ -88,7 +89,7 @@ function convertClassLikeDeclaration(node: ts.ClassLikeDeclaration, asExpression
 		type: asExpression ? 'ClassExpression' : 'ClassDeclaration',
 		id: asExpression ? convertNullable(node.name, convertIdentifier) : convertIdentifier(node.name),
 		superClass,
-		body: wrapPos<ESTree.ClassBody>(node.getSourceFile(), node.members, {
+		body: wrapPos<ESTree.ClassBody>(node, node.members, {
 			type: 'ClassBody',
 			body: node.members.filter(element => element.kind !== ts.SyntaxKind.SemicolonClassElement).map(convertClassElement)
 		})
@@ -114,13 +115,20 @@ function convertFunctionLikeClassElement(node: ts_FunctionLikeClassElement) {
 		case ts.SyntaxKind.SetAccessor: kind = 'set'; break;
 		default: unexpected(node);
 	}
+	var key: ESTree.Expression;
+	if (node.kind !== ts.SyntaxKind.Constructor) {
+		key = convertDeclarationName(node.name);
+	} else {
+		let token = node.getFirstToken();
+		key = wrap<ESTree.Identifier>(token, {
+			type: 'Identifier',
+			name: token.getText()
+		});
+	}
 	return wrap<ESTree.MethodDefinition>(node, {
 		type: 'MethodDefinition',
 		kind,
-		key: node.name ? convertDeclarationName(node.name) : wrap(node.getFirstToken(), {
-			type: 'Identifier',
-			name: node.getFirstToken().getText()
-		}),
+		key,
 		value: convertFunctionLikeDeclaration(node, IdBehavior.Ignore),
 		computed: node.name != null && node.name.kind === ts.SyntaxKind.ComputedPropertyName,
 		static: !!(node.flags & ts.NodeFlags.Static)
@@ -280,7 +288,10 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
 		case ts.SyntaxKind.NoSubstitutionTemplateLiteral:
 			return wrap<ESTree.TemplateLiteral>(node, {
 				type: 'TemplateLiteral',
-				quasis: [wrap<ESTree.TemplateElement>(node, {
+				quasis: [wrapPos<ESTree.TemplateElement>(node, {
+					pos: node.getStart() + 1,
+					end: node.getEnd() - 1
+				}, {
 					type: 'TemplateElement',
 					value: {
 						cooked: node.text,
@@ -330,7 +341,10 @@ function convertLiteral(node: ts.LiteralExpression): ESTree.Literal {
 }
 
 function convertTemplateSpanLiteral(node: ts.LiteralExpression, isFirst: boolean, isLast: boolean) {
-	return wrap<ESTree.TemplateElement>(node, {
+	return wrapPos<ESTree.TemplateElement>(node, {
+		pos: node.getStart() + 1,
+		end: node.getEnd() - (isLast ? 1 : 2)
+	}, {
 		type: 'TemplateElement',
 		value: {
 			cooked: node.text,
@@ -966,7 +980,7 @@ function convertWhileStatement(node: ts_WhileStatement) {
 
 function convertVariableDeclarationOrExpression(node: ts.VariableDeclarationList | ts.Expression): ESTree.VariableDeclaration | ESTree.Expression {
 	return node.kind === ts.SyntaxKind.VariableDeclarationList
-		? wrapPos<ESTree.VariableDeclaration>(node.getSourceFile(), node, {
+		? wrapPos<ESTree.VariableDeclaration>(node, node, {
 			type: 'VariableDeclaration',
 			kind: 'var',
 			declarations: (<ts.VariableDeclarationList>node).declarations.map(convertVariableDeclaration)
