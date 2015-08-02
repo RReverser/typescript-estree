@@ -11,7 +11,8 @@ bom:for(;;)break﻿bom;
 // line terminators
 lineFeed:0
 0;
-carriageReturn:00;
+carriageReturn:0
+0;
 carriageReturnLineFeed:0
 0;
 lineSeparator:0 0;
@@ -25,20 +26,20 @@ var œ一, ǻ둘, ɤ〩, φ, ﬁⅷ, ユニコード, x‌‍;
 
 null; true; false;
 
-0; 00; 1234567890; 01234567;
+0; 00; 1234567890; /*UNSUPPORTED: 01234567;*/
 0.; 0.00; 10.00; .0; .00
 0e0; 0E0; 0.e0; 0.00e+0; .00e-0;
 0x0; 0X0; 0x0123456789abcdefABCDEF;
 2e308;
 
 ""; "'"; "\'\"\\\b\f\n\r\t\v\0";
-"\1\00\400\000";
+/*UNSUPPORTED: "\1\00\400\000";*/
 "\x01\x23\x45\x67\x89\xAB\xCD\xEF";
 "\u0123\u4567\u89AB\uCDEF"; "\
 ";
 
 ''; '"'; '\'\"\\\b\f\n\r\t\v\0';
-'\1\00\400\000';
+/*UNSUPPORTED: '\1\00\400\000';*/
 '\x01\x23\x45\x67\x89\xAB\xCD\xEF';
 '\u0123\u4567\u89AB\uCDEF'; '\
 ';

@@ -17,7 +17,11 @@ function diffAST(path) {
             var owner = last;
             if (path.length >= 2) {
                 owner = path[path.length - 2];
-                if (path[path.length - 2].src.type === 'MethodDefinition' && path[path.length - 1].key === 'kind') {
+                if (owner.src.type === 'Program' && last.key === 'sourceType') {
+                    // KNOWN
+                    return;
+                }
+                if (owner.src.type === 'MethodDefinition' && last.key === 'kind') {
                     // KNOWN
                     return;
                 }
@@ -61,8 +65,8 @@ function diffAST(path) {
     }
 }
 function test(name, version, sourceType) {
-    console.log(name + '...');
-    var sourceCode = fs_1.readFileSync(__dirname + '/fixtures/' + name + '.js', 'utf-8');
+    console.log(name + "...");
+    var sourceCode = fs_1.readFileSync(__dirname + "/fixtures/" + name + ".js", 'utf-8');
     var sourceAst = acorn_1.parse(sourceCode, {
         ecmaVersion: version,
         locations: true,
@@ -79,8 +83,9 @@ function test(name, version, sourceType) {
             gen: generatedAst,
             code: sourceCode
         }]);
+    console.log("Done " + name);
 }
-//test('es5', 5);
-//test('es2015-script', 6, 'script');
+test('es5', 5);
+test('es2015-script', 6, 'script');
 test('es2015-module', 6, 'module');
 //# sourceMappingURL=test.js.map

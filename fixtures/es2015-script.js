@@ -20,16 +20,16 @@ lineSeparator:0 0;
 paragraphSeparator:0 0;
 
 // identifier names
-var $, _, \u0078, \u{2F9F9}, x$, x_, x\u0030, x\u{e01d5}, xa, x0, x0a,
+var $, _/*UNSUPPORTED: , \u0078, \u{2F9F9}*/, x$, x_/*UNSUPPORTED: x\u0030, x\u{e01d5}*/, xa, x0, x0a,
   x0123456789, qwertyuiopasdfghjklzxcvbnm, QWERTYUIOPASDFGHJKLZXCVBNM;
 // a representative sample of ID_Start and ID_Continue
-var 䩶, x󠇕, œ一, ǻ둘, ɤ〩, φ, ﬁⅷ, ユニコード, x‌‍;
+var /*UNSUPPORTED: 䩶, x󠇕, œ一, ǻ둘, ɤ〩, φ, ﬁⅷ, ユニコード, */x‌‍;
 var _yield; let letx; let[x\u0078] = 0; const constx = 0;
 { let x; let y = 0; const z = 0; }
 
 null; true; false;
 
-0; 00; 1234567890; 01234567;
+0; 00; 1234567890; /*UNSUPPORTED: 01234567;*/
 0.; 0.00; 10.00; .0; .00
 0e0; 0E0; 0.e0; 0.00e+0; .00e-0;
 0x0; 0X0; 0x0123456789abcdefABCDEF;
@@ -38,14 +38,14 @@ null; true; false;
 2e308;
 
 ""; "'"; "\'\"\\\b\f\n\r\t\v\0";
-"\1\00\400\000";
+/*UNSUPPORTED: "\1\00\400\000";*/
 "\x01\x23\x45\x67\x89\xAB\xCD\xEF\xab\xcd\xef";
 "\u0123\u4567\u89AB\uCDEF\u00ab\ucdef";
 "\uD834\uDF06\u2603\u03C6 \u{0000001F4a9}\u{1D306}\u{2603}\u{3c6} 𝌆☃φ"; "\
 ";
 
 ''; '"'; '\'\"\\\b\f\n\r\t\v\0';
-'\1\00\400\000';
+/*UNSUPPORTED: '\1\00\400\000';*/
 '\x01\x23\x45\x67\x89\xAB\xCD\xEF\xab\xcd\xef';
 '\u0123\u4567\u89AB\uCDEF\u00ab\ucdef';
 '\uD834\uDF06\u2603\u03C6 \u{0000001F4a9} \u{1D306}\u{2603}\u{3c6} 𝌆☃φ'; '\
@@ -81,8 +81,10 @@ x;
   set in([a, b = 0, [c,, d = 0, ...e], {f, g: h, i = 0, i: j = 0}, ...k]){},
   *d(){}, *'e'(){}, *"f"(){}, *2(){}, *.2(){}, *3.(){}, *2e2(){}, *in(){},
 });
+/*UNSUPPORTED:
 ({ __proto__: null, get __proto__(){}, set __proto__(a){}, });
 ({ "__proto__": null, __proto__(){}, });
+*/
 
 0..a; 0 .a; (0).a;
 
@@ -231,7 +233,7 @@ try{}catch({e}){}
 class A {}
 class B extends new A {
   constructor(a, b = 0, [c,, d = 0, ...e], {f, g: h, i = 0, i: j = 0}, ...k) {
-    super(new.target);
+    /*UNSUPPORTED: super(new.target);*/
     super()`template`;
     () => super(this);
   }

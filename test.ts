@@ -38,10 +38,14 @@ function diffAST(path: Array<PathItem>) {
 	var gen = last.gen;
 	if (typeof src !== 'object' || src === null || typeof gen !== 'object' || gen === null) {
 		if (src != gen) {
-			var owner = <NodePathItem>last;
+			let owner = <NodePathItem>last;
 			if (path.length >= 2) {
 				owner = path[path.length - 2];
-				if (path[path.length - 2].src.type === 'MethodDefinition' && path[path.length - 1].key === 'kind') {
+				if (owner.src.type === 'Program' && last.key === 'sourceType') {
+					// KNOWN
+					return;
+				}
+				if (owner.src.type === 'MethodDefinition' && last.key === 'kind') {
 					// KNOWN
 					return;
 				}
@@ -72,9 +76,9 @@ function diffAST(path: Array<PathItem>) {
 		});
 	}
 	*/
-	for (var key in src) {
-		var newSrc = <ESTree.Node>(<any>src)[key];
-		var newGen = <ESTree.Node>(<any>gen)[key];
+	for (let key in src) {
+		let newSrc = <ESTree.Node>(<any>src)[key];
+		let newGen = <ESTree.Node>(<any>gen)[key];
 		if (key !== 'loc' && key !== 'range' && newGen !== undefined) {
 			diffAST(path.concat([{
 				key: key,
@@ -86,8 +90,8 @@ function diffAST(path: Array<PathItem>) {
 }
 
 function test(name: string, version: number, sourceType?: string) {
-	console.log(name + '...');
-	var sourceCode = readFile(__dirname + '/fixtures/' + name + '.js', 'utf-8');
+	console.log(`${name}...`);
+	var sourceCode = readFile(`${__dirname}/fixtures/${name}.js`, 'utf-8');
 	var sourceAst = acornParse(sourceCode, {
 		ecmaVersion: version,
 		locations: true,
@@ -104,8 +108,9 @@ function test(name: string, version: number, sourceType?: string) {
 		gen: generatedAst,
 		code: sourceCode
 	}]);
+	console.log(`Done ${name}`);
 }
 
-//test('es5', 5);
-//test('es2015-script', 6, 'script');
+test('es5', 5);
+test('es2015-script', 6, 'script');
 test('es2015-module', 6, 'module');
