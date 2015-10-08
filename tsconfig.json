@@ -1,11 +1,34 @@
 {
-	"compilerOptions": {
-		"module": "commonjs",
-		"noImplicitAny": true,
-		"sourceMap": true
-	},
-	"files": [
-		"index.ts",
-		"test.ts"
-	]
+    "compilerOptions": {
+        "target": "es5",
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "isolatedModules": false,
+        "jsx": "react",
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true,
+        "declaration": false,
+        "noImplicitAny": false,
+        "removeComments": true,
+        "noLib": false,
+        "preserveConstEnums": true,
+        "suppressImplicitAnyIndexErrors": true,
+        "sourceMap": true
+    },
+    "filesGlob": [
+        "./**/*.ts",
+        "./**/*.tsx",
+        "!./node_modules/**/*"
+    ],
+    "files": [
+        "./cust_typings/better-log/better-log.d.ts",
+        "./index.ts",
+        "./test.ts",
+        "./typings/acorn/acorn.d.ts",
+        "./typings/estree/estree.d.ts",
+        "./typings/estree/flow.d.ts",
+        "./typings/node/node.d.ts",
+        "./typings/tsd.d.ts",
+        "./typings/typescript/typescript.d.ts"
+    ]
 }

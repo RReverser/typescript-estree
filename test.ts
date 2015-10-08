@@ -1,11 +1,11 @@
 /// <reference path="typings/node/node.d.ts" />
-/// <reference path="node_modules/typescript/bin/typescript.d.ts" />
+/// <reference path="typings/typescript/typescript.d.ts" />
 /// <reference path="typings/estree/estree.d.ts" />
+/// <reference path="typings/acorn/acorn.d.ts" />
+/// <reference path="cust_typings/better-log/better-log.d.ts"/>
 
-declare function installBetterLog(options: {}): void;
 declare function checkAndConvert(input: string, options?: ts.CompilerOptions): ESTree.Program;
-declare function acornParse(src: string, options: {}): ESTree.Program;
-declare function tsParse(src: string, options: ts.CompilerOptions): ESTree.Program;
+//declare function tsParse(src: string, options: ts.CompilerOptions): ESTree.Program;
 
 import { install as installBetterLog } from 'better-log';
 import 'source-map-support/register';
@@ -20,6 +20,7 @@ interface PathItem {
 	key: string;
 	src: any;
 	gen: any;
+	code?: string;
 }
 
 interface NodePathItem extends PathItem {
