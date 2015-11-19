@@ -1,10 +1,5 @@
-/// <reference path="typings/node/node.d.ts" />
-/// <reference path="node_modules/typescript/bin/typescript.d.ts" />
-/// <reference path="typings/estree/estree.d.ts" />
-/// <reference path="typings/estree/flow.d.ts" />
 var ts = require('typescript');
 var SyntaxName = ts.SyntaxKind;
-// patch SyntaxName in order to provide better names in debug
 [
     'FirstAssignment',
     'LastAssignment',
@@ -40,7 +35,7 @@ var SyntaxName = ts.SyntaxKind;
 });
 function convertPosition(sourceFile, pos) {
     var _a = sourceFile.getLineAndCharacterOfPosition(pos), line = _a.line, column = _a.character;
-    line++; // TypeScript uses 0-based lines while ESTree uses 1-based
+    line++;
     return { line: line, column: column };
 }
 function unexpected(node) {
@@ -69,7 +64,7 @@ function convertNullable(node, convert) {
 function convertClassLikeDeclaration(node, asExpression) {
     var superClass = null;
     (node.heritageClauses || []).some(function (clause) {
-        if (clause.token === 79 /* ExtendsKeyword */) {
+        if (clause.token === 81) {
             superClass = convertExpression(clause.types[0].expression);
             return true;
         }
@@ -83,13 +78,12 @@ function convertClassLikeDeclaration(node, asExpression) {
         superClass: superClass,
         body: wrapPos(node, node.members, {
             type: 'ClassBody',
-            body: node.members.filter(function (element) { return element.kind !== 179 /* SemicolonClassElement */; }).map(convertClassElement)
+            body: node.members.filter(function (element) { return element.kind !== 189; }).map(convertClassElement)
         })
     });
 }
 function convertClassElement(node) {
-    if (node.kind === 141 /* IndexSignature */) {
-        // TODO
+    if (node.kind === 147) {
         unexpected(node);
     }
     return convertFunctionLikeClassElement(node);
@@ -97,30 +91,38 @@ function convertClassElement(node) {
 function convertFunctionLikeClassElement(node) {
     var kind;
     switch (node.kind) {
-        case 135 /* MethodDeclaration */:
+        case 141:
             kind = 'method';
             break;
-        case 136 /* Constructor */:
+        case 142:
             kind = 'constructor';
             break;
-        case 137 /* GetAccessor */:
+        case 143:
             kind = 'get';
             break;
-        case 138 /* SetAccessor */:
+        case 144:
             kind = 'set';
             break;
         default: unexpected(node);
     }
+    var key;
+    if (node.kind !== 142) {
+        key = convertDeclarationName(node.name);
+    }
+    else {
+        var token = node.getFirstToken();
+        key = wrap(token, {
+            type: 'Identifier',
+            name: token.getText()
+        });
+    }
     return wrap(node, {
         type: 'MethodDefinition',
         kind: kind,
-        key: node.kind !== 136 /* Constructor */ ? convertDeclarationName(node.name) : wrap(node.getFirstToken(), {
-            type: 'Identifier',
-            name: node.getFirstToken().getText()
-        }),
-        value: convertFunctionLikeDeclaration(node, 2 /* Ignore */),
-        computed: node.name != null && node.name.kind === 128 /* ComputedPropertyName */,
-        static: !!(node.flags & 128 /* Static */)
+        key: key,
+        value: convertFunctionLikeDeclaration(node, 2),
+        computed: node.name != null && node.name.kind === 134,
+        static: !!(node.flags & 128)
     });
 }
 function convertObjectBindingPattern(node) {
@@ -130,7 +132,7 @@ function convertObjectBindingPattern(node) {
     });
 }
 function convertIdentifierOrBindingPattern(node) {
-    return node.kind === 65 /* Identifier */
+    return node.kind === 67
         ? convertIdentifier(node)
         : convertBindingPattern(node);
 }
@@ -163,9 +165,9 @@ function convertArrayBindingPattern(node) {
 }
 function convertBindingPattern(node) {
     switch (node.kind) {
-        case 151 /* ObjectBindingPattern */:
+        case 159:
             return convertObjectBindingPattern(node);
-        case 152 /* ArrayBindingPattern */:
+        case 160:
             return convertArrayBindingPattern(node);
         default:
             unexpected(node);
@@ -173,14 +175,14 @@ function convertBindingPattern(node) {
 }
 function convertExpressionAsBindingPattern(node) {
     switch (node.kind) {
-        case 155 /* ObjectLiteralExpression */:
+        case 163:
             return wrap(node, {
                 type: 'ObjectPattern',
                 properties: node.properties.map(function (node) {
                     switch (node.kind) {
-                        case 226 /* ShorthandPropertyAssignment */:
-                        case 225 /* PropertyAssignment */: {
-                            var isShorthand = node.kind === 226 /* ShorthandPropertyAssignment */;
+                        case 244:
+                        case 243: {
+                            var isShorthand = node.kind === 244;
                             return wrap(node, {
                                 type: 'Property',
                                 key: convertDeclarationName(node.name),
@@ -190,7 +192,7 @@ function convertExpressionAsBindingPattern(node) {
                                 kind: 'init',
                                 method: false,
                                 shorthand: isShorthand,
-                                computed: node.name.kind === 128 /* ComputedPropertyName */
+                                computed: node.name.kind === 134
                             });
                         }
                         default:
@@ -198,21 +200,21 @@ function convertExpressionAsBindingPattern(node) {
                     }
                 })
             });
-        case 154 /* ArrayLiteralExpression */:
+        case 162:
             return wrap(node, {
                 type: 'ArrayPattern',
                 elements: node.elements.map(function (elem) { return convertNullable(elem, convertExpressionAsBindingPattern); })
             });
-        case 65 /* Identifier */:
+        case 67:
             return convertIdentifier(node);
-        case 157 /* ElementAccessExpression */:
+        case 165:
             return wrap(node, {
                 type: 'MemberExpression',
                 object: convertExpressionAsBindingPattern(node.expression),
                 property: convertExpression(node.argumentExpression),
                 computed: true
             });
-        case 156 /* PropertyAccessExpression */:
+        case 164:
             return wrap(node, {
                 type: 'MemberExpression',
                 object: convertExpressionAsBindingPattern(node.expression),
@@ -225,36 +227,36 @@ function convertExpressionAsBindingPattern(node) {
 }
 function convertDeclarationName(node) {
     switch (node.kind) {
-        case 128 /* ComputedPropertyName */:
+        case 134:
             return convertExpression(node.expression);
-        case 151 /* ObjectBindingPattern */:
-        case 152 /* ArrayBindingPattern */:
+        case 159:
+        case 160:
             return convertBindingPattern(node);
         default:
             return convertExpression(node);
     }
 }
 function convertPropertyDeclaration(node) {
-    // TODO
     unexpected(node);
+    return;
 }
 function convertLiteral(node) {
     var raw = node.getText();
     switch (node.kind) {
-        case 80 /* FalseKeyword */:
-        case 95 /* TrueKeyword */:
+        case 82:
+        case 97:
             return wrap(node, {
                 type: 'Literal',
-                value: node.kind === 95 /* TrueKeyword */,
+                value: node.kind === 97,
                 raw: raw
             });
-        case 7 /* NumericLiteral */:
+        case 8:
             return wrap(node, {
                 type: 'Literal',
                 value: Number(node.text),
                 raw: raw
             });
-        case 10 /* NoSubstitutionTemplateLiteral */:
+        case 11:
             return wrap(node, {
                 type: 'TemplateLiteral',
                 quasis: [wrapPos(node, {
@@ -270,13 +272,13 @@ function convertLiteral(node) {
                     })],
                 expressions: []
             });
-        case 8 /* StringLiteral */:
+        case 9:
             return wrap(node, {
                 type: 'Literal',
                 value: node.text,
                 raw: raw
             });
-        case 9 /* RegularExpressionLiteral */: {
+        case 10: {
             var _a = raw.match(/^\/(.*)\/([a-z]*)$/), pattern = _a[1], flags = _a[2];
             var value;
             try {
@@ -295,7 +297,7 @@ function convertLiteral(node) {
                 }
             });
         }
-        case 89 /* NullKeyword */:
+        case 91:
             return wrap(node, {
                 type: 'Literal',
                 value: null,
@@ -338,7 +340,7 @@ function convertTaggedTemplateExpression(node) {
     return wrap(node, {
         type: 'TaggedTemplateExpression',
         tag: convertExpression(node.tag),
-        quasi: tmpl.kind === 172 /* TemplateExpression */
+        quasi: tmpl.kind === 181
             ? convertTemplateExpression(tmpl)
             : convertLiteral(tmpl)
     });
@@ -350,14 +352,14 @@ function convertExpressionStatement(node) {
     });
 }
 function convertTopStatement(node) {
-    if (node.flags & 1 /* Export */) {
-        if (node.flags & 256 /* Default */) {
+    if (node.flags & 1) {
+        if (node.flags & 1024) {
             var declaration;
             switch (node.kind) {
-                case 201 /* FunctionDeclaration */:
-                    declaration = convertFunction(node, node.name ? 'FunctionDeclaration' : 'FunctionExpression', 0 /* AllowMissing */);
+                case 211:
+                    declaration = convertFunction(node, node.name ? 'FunctionDeclaration' : 'FunctionExpression', 0);
                     break;
-                case 202 /* ClassDeclaration */:
+                case 212:
                     declaration = convertClassLikeDeclaration(node, !node.name);
                     break;
                 default:
@@ -378,18 +380,18 @@ function convertTopStatement(node) {
         }
     }
     switch (node.kind) {
-        case 210 /* ImportDeclaration */:
+        case 220:
             return convertImportDeclaration(node);
-        case 216 /* ExportDeclaration */:
+        case 226:
             return convertExportDeclaration(node);
-        case 215 /* ExportAssignment */:
+        case 225:
             return convertExportAssignment(node);
         default:
             return convertStatement(node);
     }
 }
 function convertImportDeclaration(node) {
-    if (node.moduleSpecifier.kind !== 8 /* StringLiteral */) {
+    if (node.moduleSpecifier.kind !== 9) {
         unexpected(node.moduleSpecifier);
     }
     return wrap(node, {
@@ -411,13 +413,13 @@ function convertImportClause(node) {
     }
     if (namedBindings) {
         switch (namedBindings.kind) {
-            case 212 /* NamespaceImport */:
+            case 222:
                 specifiers.push(wrap(namedBindings, {
                     type: 'ImportNamespaceSpecifier',
                     local: convertIdentifier(namedBindings.name)
                 }));
                 break;
-            case 213 /* NamedImports */:
+            case 223:
                 specifiers = specifiers.concat(namedBindings.elements.map(function (binding) {
                     return wrap(binding, {
                         type: 'ImportSpecifier',
@@ -435,7 +437,7 @@ function convertImportClause(node) {
 function convertExportDeclaration(node) {
     var source;
     if (node.moduleSpecifier) {
-        if (node.moduleSpecifier.kind !== 8 /* StringLiteral */) {
+        if (node.moduleSpecifier.kind !== 9) {
             unexpected(node.moduleSpecifier);
         }
         source = convertLiteral(node.moduleSpecifier);
@@ -472,44 +474,44 @@ function convertExportAssignment(node) {
 }
 function convertStatement(node) {
     switch (node.kind) {
-        case 180 /* Block */:
+        case 190:
             return convertBlock(node);
-        case 181 /* VariableStatement */:
+        case 191:
             return convertVariableStatement(node);
-        case 194 /* SwitchStatement */:
+        case 204:
             return convertSwitchStatement(node);
-        case 197 /* TryStatement */:
+        case 207:
             return convertTryStatement(node);
-        case 201 /* FunctionDeclaration */:
+        case 211:
             return convertFunctionDeclaration(node);
-        case 202 /* ClassDeclaration */:
+        case 212:
             return convertClassLikeDeclaration(node);
-        case 198 /* DebuggerStatement */:
+        case 208:
             return wrap(node, { type: 'DebuggerStatement' });
-        case 182 /* EmptyStatement */:
+        case 192:
             return wrap(node, { type: 'EmptyStatement' });
-        case 191 /* BreakStatement */:
-        case 190 /* ContinueStatement */:
+        case 201:
+        case 200:
             return convertBreakOrContinuteStatement(node);
-        case 192 /* ReturnStatement */:
+        case 202:
             return convertReturnStatement(node);
-        case 195 /* LabeledStatement */:
+        case 205:
             return convertLabeledStatement(node);
-        case 196 /* ThrowStatement */:
+        case 206:
             return convertThrowStatement(node);
-        case 183 /* ExpressionStatement */:
+        case 193:
             return convertExpressionStatement(node);
-        case 193 /* WithStatement */:
+        case 203:
             return convertWithStatement(node);
-        case 188 /* ForInStatement */:
-        case 189 /* ForOfStatement */:
+        case 198:
+        case 199:
             return convertForInOrOfStatement(node);
-        case 187 /* ForStatement */:
+        case 197:
             return convertForStatement(node);
-        case 186 /* WhileStatement */:
-        case 185 /* DoStatement */:
+        case 196:
+        case 195:
             return convertWhileStatement(node);
-        case 184 /* IfStatement */:
+        case 194:
             return convertIfStatement(node);
         default:
             unexpected(node);
@@ -523,7 +525,7 @@ function convertThrowStatement(node) {
 }
 function convertBreakOrContinuteStatement(node) {
     return wrap(node, {
-        type: node.kind === 191 /* BreakStatement */ ? 'BreakStatement' : 'ContinueStatement',
+        type: node.kind === 201 ? 'BreakStatement' : 'ContinueStatement',
         label: convertNullable(node.label, convertIdentifier)
     });
 }
@@ -535,51 +537,51 @@ function convertReturnStatement(node) {
 }
 function convertExpression(node) {
     switch (node.kind) {
-        case 176 /* OmittedExpression */:
+        case 185:
             return null;
-        case 93 /* ThisKeyword */:
+        case 95:
             return wrap(node, { type: 'ThisExpression' });
-        case 91 /* SuperKeyword */:
+        case 93:
             return wrap(node, { type: 'Super' });
-        case 65 /* Identifier */:
+        case 67:
             return convertIdentifier(node);
-        case 170 /* BinaryExpression */:
+        case 179:
             return convertBinaryExpression(node);
-        case 168 /* PrefixUnaryExpression */:
-        case 169 /* PostfixUnaryExpression */:
+        case 177:
+        case 178:
             return convertPrefixOrPostfixUnaryExpression(node);
-        case 165 /* DeleteExpression */:
-        case 166 /* TypeOfExpression */:
-        case 167 /* VoidExpression */:
+        case 173:
+        case 174:
+        case 175:
             return convertNamedUnaryExpression(node);
-        case 171 /* ConditionalExpression */:
+        case 180:
             return convertConditionalExpression(node);
-        case 158 /* CallExpression */:
-        case 159 /* NewExpression */:
+        case 166:
+        case 167:
             return convertCallOrNewExpression(node);
-        case 162 /* ParenthesizedExpression */:
+        case 170:
             return convertExpression(node.expression);
-        case 154 /* ArrayLiteralExpression */:
+        case 162:
             return convertArrayLiteralExpression(node);
-        case 155 /* ObjectLiteralExpression */:
+        case 163:
             return convertObjectLiteralExpression(node);
-        case 164 /* ArrowFunction */:
+        case 172:
             return convertArrowFunction(node);
-        case 163 /* FunctionExpression */:
+        case 171:
             return convertFunctionLikeDeclaration(node);
-        case 175 /* ClassExpression */:
+        case 184:
             return convertClassLikeDeclaration(node);
-        case 156 /* PropertyAccessExpression */:
+        case 164:
             return convertPropertyAccessExpression(node);
-        case 157 /* ElementAccessExpression */:
+        case 165:
             return convertElementAccessExpression(node);
-        case 172 /* TemplateExpression */:
+        case 181:
             return convertTemplateExpression(node);
-        case 174 /* SpreadElementExpression */:
+        case 183:
             return convertSpreadElementExpression(node);
-        case 173 /* YieldExpression */:
+        case 182:
             return convertYieldExpression(node);
-        case 160 /* TaggedTemplateExpression */:
+        case 168:
             return convertTaggedTemplateExpression(node);
         default:
             return convertLiteral(node);
@@ -616,12 +618,11 @@ function convertSourceFile(node) {
 }
 exports.convertSourceFile = convertSourceFile;
 function checkAndConvert(input, options) {
-    options = options ? ts.clone(options) : ts.getDefaultCompilerOptions();
+    options = options ? ts['clone'](options) : ts.getDefaultCompilerOptions();
     options.noLib = true;
     options.noResolve = true;
     var inputFileName = "module.ts";
     var sourceFile = ts.createSourceFile(inputFileName, input, options.target);
-    // Create a compilerHost object to allow the compiler to read and write files
     var program = ts.createProgram([inputFileName], options, {
         getSourceFile: function (fileName, target) { return fileName === inputFileName ? sourceFile : undefined; },
         writeFile: function (name, text, writeByteOrderMark) {
@@ -641,7 +642,7 @@ function convertVariableStatement(node) {
     var _a = node.declarationList, flags = _a.flags, declarations = _a.declarations;
     return wrap(node, {
         type: 'VariableDeclaration',
-        kind: (flags & 8192 /* Const */) ? 'const' : (flags & 4096 /* Let */) ? 'let' : 'var',
+        kind: (flags & 32768) ? 'const' : (flags & 16384) ? 'let' : 'var',
         declarations: declarations.map(convertVariableDeclaration)
     });
 }
@@ -662,7 +663,7 @@ function convertSwitchStatement(node) {
 function convertCaseOrDefaultClause(node) {
     return wrap(node, {
         type: 'SwitchCase',
-        test: node.kind === 221 /* CaseClause */ ? convertExpression(node.expression) : null,
+        test: node.kind === 239 ? convertExpression(node.expression) : null,
         consequent: node.statements.map(convertStatement)
     });
 }
@@ -710,26 +711,25 @@ function convertYieldExpression(node) {
 function convertPrefixOrPostfixUnaryExpression(node) {
     var operator = tryConvertUpdateOperator(node.operator);
     var isUnary = operator === undefined;
-    if (isUnary) {
+    if (isUnary)
         operator = convertUnaryOperator(node.operator);
-    }
     return wrap(node, {
         type: isUnary ? 'UnaryExpression' : 'UpdateExpression',
         operator: operator,
-        prefix: node.kind === 168 /* PrefixUnaryExpression */,
+        prefix: node.kind === 177,
         argument: convertExpression(node.operand)
     });
 }
 function convertNamedUnaryExpression(node) {
     var operator;
     switch (node.kind) {
-        case 165 /* DeleteExpression */:
+        case 173:
             operator = "delete";
             break;
-        case 166 /* TypeOfExpression */:
+        case 174:
             operator = "typeof";
             break;
-        case 167 /* VoidExpression */:
+        case 175:
             operator = "void";
             break;
         default:
@@ -744,21 +744,21 @@ function convertNamedUnaryExpression(node) {
 }
 function convertBinaryExpression(node) {
     switch (node.operatorToken.kind) {
-        case 49 /* BarBarToken */:
-        case 48 /* AmpersandAmpersandToken */:
+        case 51:
+        case 50:
             return wrap(node, {
                 type: 'LogicalExpression',
                 operator: node.operatorToken.getText(),
                 left: convertExpression(node.left),
                 right: convertExpression(node.right)
             });
-        case 23 /* CommaToken */: {
+        case 24: {
             var expressions = [];
             var expr = node;
             do {
                 expressions.unshift(convertExpression(expr.right));
                 expr = expr.left;
-            } while (expr.kind === 170 /* BinaryExpression */ && expr.operatorToken.kind === 23 /* CommaToken */);
+            } while (expr.kind === 179 && expr.operatorToken.kind === 24);
             expressions.unshift(convertExpression(expr));
             return wrap(node, {
                 type: 'SequenceExpression',
@@ -792,30 +792,36 @@ function convertConditionalExpression(node) {
         alternate: convertExpression(node.whenFalse)
     });
 }
+var IdBehavior;
+(function (IdBehavior) {
+    IdBehavior[IdBehavior["AllowMissing"] = 0] = "AllowMissing";
+    IdBehavior[IdBehavior["Enforce"] = 1] = "Enforce";
+    IdBehavior[IdBehavior["Ignore"] = 2] = "Ignore";
+})(IdBehavior || (IdBehavior = {}));
 function convertFunction(node, type, idBehavior, allowExpressionBody) {
     var body = node.body;
-    if (body.kind !== 180 /* Block */ && !allowExpressionBody) {
+    if (body.kind !== 190 && !allowExpressionBody) {
         unexpected(body);
     }
     return wrap(node, {
         type: type,
-        id: idBehavior === 1 /* Enforce */ || idBehavior === 0 /* AllowMissing */ && node.name ? convertIdentifier(node.name) : null,
+        id: idBehavior === 1 || idBehavior === 0 && node.name ? convertIdentifier(node.name) : null,
         params: node.parameters.map(convertParameterDeclaration),
-        body: body.kind === 180 /* Block */ ? convertBlock(body) : convertExpression(body),
+        body: body.kind === 190 ? convertBlock(body) : convertExpression(body),
         generator: !!node.asteriskToken
     });
 }
 function convertFunctionLikeDeclaration(node, idBehavior) {
-    if (idBehavior === void 0) { idBehavior = 0 /* AllowMissing */; }
+    if (idBehavior === void 0) { idBehavior = 0; }
     return convertFunction(node, 'FunctionExpression', idBehavior);
 }
 function convertArrowFunction(node) {
-    var arrowFn = convertFunction(node, 'ArrowFunctionExpression', 2 /* Ignore */, true);
-    arrowFn.expression = node.body.kind !== 180 /* Block */;
+    var arrowFn = convertFunction(node, 'ArrowFunctionExpression', 2, true);
+    arrowFn.expression = node.body.kind !== 190;
     return arrowFn;
 }
 function convertFunctionDeclaration(node) {
-    return convertFunction(node, 'FunctionDeclaration', 1 /* Enforce */);
+    return convertFunction(node, 'FunctionDeclaration', 1);
 }
 function convertParameterDeclaration(node) {
     var name = convertDeclarationName(node.name);
@@ -846,13 +852,13 @@ function convertIfStatement(node) {
 }
 function convertWhileStatement(node) {
     return wrap(node, {
-        type: node.kind === 186 /* WhileStatement */ ? 'WhileStatement' : 'DoWhileStatement',
+        type: node.kind === 196 ? 'WhileStatement' : 'DoWhileStatement',
         test: convertExpression(node.expression),
         body: convertStatement(node.statement)
     });
 }
 function convertVariableDeclarationOrExpression(node) {
-    return node.kind === 200 /* VariableDeclarationList */
+    return node.kind === 210
         ? wrapPos(node, node, {
             type: 'VariableDeclaration',
             kind: 'var',
@@ -871,7 +877,7 @@ function convertForStatement(node) {
 }
 function convertForInOrOfStatement(node) {
     return wrap(node, {
-        type: node.kind === 188 /* ForInStatement */ ? 'ForInStatement' : 'ForOfStatement',
+        type: node.kind === 198 ? 'ForInStatement' : 'ForOfStatement',
         left: convertVariableDeclarationOrExpression(node.initializer),
         right: convertExpression(node.expression),
         body: convertStatement(node.statement)
@@ -886,7 +892,7 @@ function convertWithStatement(node) {
 }
 function convertCallOrNewExpression(node) {
     return wrap(node, {
-        type: node.kind === 158 /* CallExpression */ ? 'CallExpression' : 'NewExpression',
+        type: node.kind === 166 ? 'CallExpression' : 'NewExpression',
         callee: convertExpression(node.expression),
         arguments: node.arguments ? node.arguments.map(convertExpression) : []
     });
@@ -905,19 +911,19 @@ function convertObjectLiteralExpression(node) {
 }
 function convertObjectLiteralElement(node) {
     switch (node.kind) {
-        case 226 /* ShorthandPropertyAssignment */:
-        case 225 /* PropertyAssignment */:
+        case 244:
+        case 243:
             return convertObjectLiteralPropertyElement(node);
-        case 135 /* MethodDeclaration */:
-        case 137 /* GetAccessor */:
-        case 138 /* SetAccessor */:
+        case 141:
+        case 143:
+        case 144:
             return convertObjectLiteralFunctionLikeElement(node);
         default:
             unexpected(node);
     }
 }
 function convertObjectLiteralPropertyElement(node) {
-    var isShorthand = node.kind === 226 /* ShorthandPropertyAssignment */;
+    var isShorthand = node.kind === 244;
     return wrap(node, {
         type: 'Property',
         key: convertDeclarationName(node.name),
@@ -927,7 +933,7 @@ function convertObjectLiteralPropertyElement(node) {
         kind: 'init',
         method: false,
         shorthand: isShorthand,
-        computed: node.name.kind === 128 /* ComputedPropertyName */
+        computed: node.name.kind === 134
     });
 }
 function convertObjectBindingElement(node) {
@@ -947,34 +953,34 @@ function convertObjectBindingElement(node) {
         kind: 'init',
         method: false,
         shorthand: isShorthand,
-        computed: node.name.kind === 128 /* ComputedPropertyName */
+        computed: node.name.kind === 134
     });
 }
 function convertObjectLiteralFunctionLikeElement(node) {
     return wrap(node, {
         type: 'Property',
         key: convertDeclarationName(node.name),
-        value: convertFunctionLikeDeclaration(node, 2 /* Ignore */),
-        kind: node.kind === 137 /* GetAccessor */ ? 'get' : node.kind === 138 /* SetAccessor */ ? 'set' : 'init',
-        method: node.kind === 135 /* MethodDeclaration */,
+        value: convertFunctionLikeDeclaration(node, 2),
+        kind: node.kind === 143 ? 'get' : node.kind === 144 ? 'set' : 'init',
+        method: node.kind === 141,
         shorthand: false,
-        computed: node.name.kind === 128 /* ComputedPropertyName */
+        computed: node.name.kind === 134
     });
 }
 function isAssignmentOperator(op) {
     switch (op) {
-        case 53 /* EqualsToken */:
-        case 54 /* PlusEqualsToken */:
-        case 55 /* MinusEqualsToken */:
-        case 56 /* AsteriskEqualsToken */:
-        case 57 /* SlashEqualsToken */:
-        case 58 /* PercentEqualsToken */:
-        case 59 /* LessThanLessThanEqualsToken */:
-        case 60 /* GreaterThanGreaterThanEqualsToken */:
-        case 61 /* GreaterThanGreaterThanGreaterThanEqualsToken */:
-        case 63 /* BarEqualsToken */:
-        case 64 /* CaretEqualsToken */:
-        case 62 /* AmpersandEqualsToken */:
+        case 55:
+        case 56:
+        case 57:
+        case 58:
+        case 59:
+        case 60:
+        case 61:
+        case 62:
+        case 63:
+        case 65:
+        case 66:
+        case 64:
             return true;
         default:
             return false;
@@ -982,13 +988,13 @@ function isAssignmentOperator(op) {
 }
 function convertUnaryOperator(op) {
     switch (op) {
-        case 34 /* MinusToken */:
+        case 36:
             return "-";
-        case 33 /* PlusToken */:
+        case 35:
             return "+";
-        case 46 /* ExclamationToken */:
+        case 48:
             return "!";
-        case 47 /* TildeToken */:
+        case 49:
             return "~";
         default:
             throw new TypeError("Unknown unary operator: " + SyntaxName[op]);
@@ -996,10 +1002,9 @@ function convertUnaryOperator(op) {
 }
 function tryConvertUpdateOperator(op) {
     switch (op) {
-        case 38 /* PlusPlusToken */:
+        case 40:
             return "++";
-        case 39 /* MinusMinusToken */:
+        case 41:
             return "--";
     }
 }
-//# sourceMappingURL=index.js.map

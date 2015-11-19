@@ -1,6 +1,3 @@
-/// <reference path="typings/node/node.d.ts" />
-/// <reference path="node_modules/typescript/bin/typescript.d.ts" />
-/// <reference path="typings/estree/estree.d.ts" />
 var better_log_1 = require('better-log');
 require('source-map-support/register');
 var acorn_1 = require('acorn');
@@ -18,11 +15,9 @@ function diffAST(path) {
             if (path.length >= 2) {
                 owner = path[path.length - 2];
                 if (owner.src.type === 'Program' && last.key === 'sourceType') {
-                    // KNOWN
                     return;
                 }
                 if (owner.src.type === 'MethodDefinition' && last.key === 'kind') {
-                    // KNOWN
                     return;
                 }
                 if (path.length >= 3 && path[path.length - 3].src.type) {
@@ -41,17 +36,6 @@ function diffAST(path) {
         }
         return;
     }
-    /*
-    if (src.range && gen.range && (src.range[0] !== gen.range[0] || src.range[1] !== gen.range[1])) {
-        console.warn({
-            path: path.map(function (item) {
-                return item.key;
-            }).join('.'),
-            srcCovers: path[0].code.slice(src.range[0], src.range[1]),
-            genCovers: path[0].code.slice(gen.range[0], gen.range[1])
-        });
-    }
-    */
     for (var key in src) {
         var newSrc = src[key];
         var newGen = gen[key];
@@ -75,7 +59,7 @@ function test(name, version, sourceType) {
         sourceFile: 'module.ts'
     });
     var generatedAst = _1.checkAndConvert(sourceCode, {
-        target: version === 5 ? 1 /* ES5 */ : 2 /* ES6 */
+        target: version === 5 ? 1 : 2
     });
     diffAST([{
             key: 'Program',
@@ -88,4 +72,3 @@ function test(name, version, sourceType) {
 test('es5', 5);
 test('es2015-script', 6, 'script');
 test('es2015-module', 6, 'module');
-//# sourceMappingURL=test.js.map

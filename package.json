@@ -1,6 +1,6 @@
 {
   "name": "typescript-estree",
-  "version": "1.0.0",
+  "version": "1.0.1-alpha",
   "description": "TypeScript => ESTree AST converter",
   "main": "index.js",
   "scripts": {
@@ -24,6 +24,7 @@
   },
   "homepage": "https://github.com/rreverser/typescript-estree#readme",
   "dependencies": {
+    "better-log": "^1.3.3",
     "typescript": "^1.5.3"
   },
   "devDependencies": {
