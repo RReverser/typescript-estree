@@ -72,4 +72,3 @@ function test(name, version, sourceType) {
 test('es5', 5);
 test('es2015-script', 6, 'script');
 test('es2015-module', 6, 'module');
-//# sourceMappingURL=test.js.map
